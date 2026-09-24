@@ -38,3 +38,23 @@ test('screen holds the finished week through lock night, rolls at 12:01am Wednes
   assert.equal(wed.locked, false);
   assert.equal(wed.prevKey, '2026-09-29');
 });
+
+test('one scoring week: the week just closed on lock night, last week otherwise', async () => {
+  const { weekInfo } = await import('../src/lib/time.js');
+  const night = weekInfo(ws, new Date('2026-09-29T22:30:00Z'));   // Tue 6:30pm ET
+  assert.equal(night.scoreKey, '2026-09-29');
+  assert.equal(night.scoreLabel, 'This week');
+  const beforeLock = weekInfo(ws, new Date('2026-09-29T20:00:00Z')); // Tue 4pm ET
+  assert.equal(beforeLock.scoreKey, '2026-09-22');
+  assert.equal(beforeLock.scoreLabel, 'Last week');
+  const wed = weekInfo(ws, new Date('2026-09-30T04:01:00Z'));      // Wed 12:01am ET
+  assert.equal(wed.scoreKey, '2026-09-29');                        // same week, now "last week"
+  assert.equal(wed.scoreLabel, 'Last week');
+});
+
+test('no screen picks its own week: views read scoreKey and key only', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const dir = new URL('../src/views/', import.meta.url);
+  const offenders = readdirSync(dir).filter((f) => /prevKey|weekKeyAt|displayKeyAt/.test(readFileSync(new URL(f, dir), 'utf8')));
+  assert.deepEqual(offenders, []);
+});

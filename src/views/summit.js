@@ -57,12 +57,12 @@ export function renderSummit(el) {
       }).join('')
     : tile('', 'Bids out', money(sum(bids)), `${bids.length} waiting on a yes`);
 
-  // last week, committed vs did
+  // the scored week, committed vs did
   const RS = repsScoped();
   const tot = {};
   cfg.measures.forEach((m) => (tot[m.key] = { c: 0, d: 0 }));
   RS.forEach((r) => {
-    const c = commitFor(r.id, w.prevKey), a = autoDid(cfg, rows, r.id, w.prevKey);
+    const c = commitFor(r.id, w.scoreKey), a = autoDid(cfg, rows, r.id, w.scoreKey);
     cfg.measures.forEach((m) => { tot[m.key].c += comValue(c, m.key); tot[m.key].d += didValue(c, a, m.key); });
   });
   const inCount = RS.filter((r) => commitFor(r.id, w.key)).length;
@@ -92,7 +92,7 @@ export function renderSummit(el) {
       const O = R.filter((o) => isOpen(cfg, o));
       const rr = RS.filter((r) => r.branch === b);
       const wkv = { c: 0, d: 0 };
-      if (wonM) rr.forEach((r) => { const c = commitFor(r.id, w.prevKey); wkv.c += comValue(c, wonM.key); wkv.d += didValue(c, autoDid(cfg, rows, r.id, w.prevKey), wonM.key); });
+      if (wonM) rr.forEach((r) => { const c = commitFor(r.id, w.scoreKey); wkv.c += comValue(c, wonM.key); wkv.d += didValue(c, autoDid(cfg, rows, r.id, w.scoreKey), wonM.key); });
       return { b, signed: sum(R.filter((o) => isWon(cfg, o))), open: sum(O), weighted: sum(O, (o) => weighted(cfg, o)), n: O.length, inB: rr.filter((r) => commitFor(r.id, w.key)).length, rr: rr.length, wk: wkv };
     });
 
@@ -121,7 +121,7 @@ export function renderSummit(el) {
     </div>
     <div class="card">
       <div class="sec-h"><h2 class="s16">By branch</h2><span class="sub">Friendly competition</span></div>
-      <div class="tw flat"><table><thead><tr><th>Branch</th><th class="num">Signed</th><th class="num">Open</th><th class="num">Weighted</th>${wonM ? `<th class="num">Last wk ${esc(mLabel(wonM))}</th>` : ''}<th>Commits in</th></tr></thead><tbody>
+      <div class="tw flat"><table><thead><tr><th>Branch</th><th class="num">Signed</th><th class="num">Open</th><th class="num">Weighted</th>${wonM ? `<th class="num">${esc(w.scoreLabel)} ${esc(mLabel(wonM))}</th>` : ''}<th>Commits in</th></tr></thead><tbody>
       ${br.map((x) => `<tr><td><b>${esc(x.b)}</b></td><td class="num">${money(x.signed)}</td><td class="num">${money(x.open)}<small class="m"> ·${x.n}</small></td><td class="num">${money(x.weighted)}</td>${wonM ? `<td class="num"><span class="dot ${ryg(x.wk.d, x.wk.c)}"></span> ${money(x.wk.d)}<small class="m">/${money(x.wk.c)}</small></td>` : ''}<td>${x.inB} of ${x.rr}</td></tr>`).join('')}
       </tbody></table></div>
       ${company && gt.length ? `<div class="kv top"><span>Total commitment (${gt.map((x) => esc(x.t.label.toLowerCase())).join(' + ')})</span><b>${money(totalAct)} / ${money(totalGoal)}</b></div>` : ''}
@@ -131,7 +131,7 @@ export function renderSummit(el) {
   </div>
 
   <div class="sec">
-    <div class="sec-h"><h2>Last week · committed vs did, ${esc(scopeLabel())}</h2><span class="sub">Week ending ${fmtDate(w.prevKey)}. Detail on The Climb.</span></div>
+    <div class="sec-h"><h2>${esc(w.scoreLabel)} · committed vs did, ${esc(scopeLabel())}</h2><span class="sub">Week ending ${fmtDate(w.scoreKey)}${w.locked ? ', locked' : ''}. Detail on The Climb.</span></div>
     <div class="tiles">${cfg.measures.map((m) => { const t = tot[m.key]; return tile(ryg(t.d, t.c), esc(mLabel(m)), `${fmtM(m, t.d)} <small>/ ${fmtM(m, t.c)}</small>`, t.c ? `${pct(t.d, t.c)}%` : 'no commit yet'); }).join('')}</div>
   </div>
 

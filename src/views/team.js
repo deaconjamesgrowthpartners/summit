@@ -18,7 +18,7 @@ export function renderTeam(el, tab) {
   }
   const lab = (m) => mLabel(m, team);
   const fmtM = (m, v) => (m.money ? money(v) : v);
-  const lastC = commitFor(r.id, w.prevKey), lastA = autoDid(cfg, opps, r.id, w.prevKey), thisC = commitFor(r.id, w.key);
+  const scoreC = commitFor(r.id, w.scoreKey), scoreA = autoDid(cfg, opps, r.id, w.scoreKey), thisC = commitFor(r.id, w.key);
   const canEdit = S.admin || (S.me && S.me.active && (S.me.id === r.id || S.me.role === 'leader'));
   const blocked = (week) => cfg.late_policy === 'block' && !isLeader() && isLockedWeek(cfg, week);
   const dis = (week) => (canEdit && !blocked(week) ? '' : 'disabled');
@@ -45,7 +45,7 @@ export function renderTeam(el, tab) {
     if (!rs.length) return null;
     const t = {};
     cfg.measures.forEach((m) => (t[m.key] = { c: 0, d: 0 }));
-    rs.forEach((x) => { const c = commitFor(x.id, w.prevKey), a = autoDid(cfg, opps, x.id, w.prevKey); cfg.measures.forEach((m) => { t[m.key].c += comValue(c, m.key); t[m.key].d += didValue(c, a, m.key); }); });
+    rs.forEach((x) => { const c = commitFor(x.id, w.scoreKey), a = autoDid(cfg, opps, x.id, w.scoreKey); cfg.measures.forEach((m) => { t[m.key].c += comValue(c, m.key); t[m.key].d += didValue(c, a, m.key); }); });
     const rv = ratio && t[ratio.den].d ? t[ratio.num].d / t[ratio.den].d : 0;
     return { b, t, rv, den: ratio ? t[ratio.den].d : 0 };
   }).filter(Boolean);
@@ -57,8 +57,6 @@ export function renderTeam(el, tab) {
     const auto = m.key in a;
     return `<td class="num"><span class="dot ${c ? ryg(did, com) : 'n'}"></span> <input class="ed num" inputmode="decimal" ${canEdit ? '' : 'disabled'} data-cm="${esc(r.id)}" data-cw="${week}" data-cf="actual" data-ck="${esc(m.key)}" value="${manual ? esc(c.actual[m.key]) : ''}" placeholder="${auto ? esc(fmtM(m, a[m.key])) : '0'}" aria-label="${esc(lab(m))} did"><div class="auto">${auto && !manual ? 'from board' : ''}</div></td>`;
   }).join('')}</tr>`;
-  // lock night: the week just closed is still on screen. enter what you did.
-  const thisDid = w.locked ? didRow('This week did', w.key, thisC, autoDid(cfg, opps, r.id, w.key)) : '';
 
   const committedAt = thisC && thisC.submitted_at
     ? new Date(thisC.submitted_at).toLocaleString('en-US', { timeZone: cfg.lock_tz, weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
@@ -72,10 +70,10 @@ export function renderTeam(el, tab) {
     <div class="card cform">
       <div class="sec-h"><h2 class="s16">My week · <span class="person">${esc(r.full_name)}</span>${r.branch ? ' · ' + esc(r.branch) : ''}</h2>${canEdit ? '' : '<span class="ro">view only</span>'}</div>
       <div class="tw bare"><table><thead><tr><th></th>${cfg.measures.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}</tr></thead><tbody>
-        <tr><td>Last week committed</td>${cfg.measures.map((m) => `<td class="num">${lastC ? fmtM(m, comValue(lastC, m.key)) : '<span class="m" style="color:var(--muted)">none</span>'}</td>`).join('')}</tr>
-        ${didRow('Last week did', w.prevKey, lastC, lastA)}
+        ${w.locked ? '' : `<tr><td>Last week committed</td>${cfg.measures.map((m) => `<td class="num">${scoreC ? fmtM(m, comValue(scoreC, m.key)) : '<span class="m" style="color:var(--muted)">none</span>'}</td>`).join('')}</tr>
+        ${didRow('Last week did', w.scoreKey, scoreC, scoreA)}`}
         <tr><td>${w.locked ? 'This week committed' : 'This week I commit to'}</td>${cfg.measures.map((m) => `<td class="num"><input class="ed num ${late ? 'late' : ''}" inputmode="decimal" ${dis(w.key)} data-cm="${esc(r.id)}" data-cw="${w.key}" data-cf="committed" data-ck="${esc(m.key)}" value="${thisC && hasVal(thisC.committed?.[m.key]) ? esc(thisC.committed[m.key]) : ''}" placeholder="${m.money ? '$' : '#'}" aria-label="${esc(lab(m))} commit"></td>`).join('')}</tr>
-        ${thisDid}
+        ${w.locked ? didRow('This week did', w.scoreKey, scoreC, scoreA) : ''}
       </tbody></table></div>
       <div class="row-actions">
         ${thisC ? `<span class="pill ${late ? 'y' : 'g'}">Committed${committedAt ? ' ' + esc(committedAt) : ''}${late ? ' · edited after lock' : ''}</span>` : `<span class="pill ${w.locked ? 'r' : 'n'}">${w.locked ? 'No commit this week' : 'Not committed yet'}</span>`}
@@ -84,7 +82,7 @@ export function renderTeam(el, tab) {
       <div style="margin-top:8px"><input class="ed txt wide" ${dis(w.key)} data-cm="${esc(r.id)}" data-cw="${w.key}" data-cf="note" placeholder="${esc(tab.note_prompt || 'What do you need this week?')}" value="${esc(thisC?.note || '')}" aria-label="Note"></div>
     </div>
     <div class="card">
-      <div class="sec-h"><h2 class="s16">Branches · last week</h2><span class="sub">${esc(ratio?.sub || 'did / committed')}</span></div>
+      <div class="sec-h"><h2 class="s16">Branches · ${esc(w.scoreLabel.toLowerCase())}</h2><span class="sub">${esc(ratio?.sub || 'did / committed')}</span></div>
       <div class="tw flat"><table><thead><tr><th>Branch</th>${bm.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}${ratio ? `<th class="num">${esc(ratio.label)}</th>` : ''}</tr></thead><tbody>
       ${branchRows.map((x) => `<tr><td><b>${esc(x.b)}</b></td>${bm.map((m) => `<td class="num">${m.auto === 'won_value' ? `<span class="dot ${ryg(x.t[m.key].d, x.t[m.key].c)}"></span> ` : ''}${fmtM(m, x.t[m.key].d)}<small class="m">/${fmtM(m, x.t[m.key].c)}</small></td>`).join('')}${ratio ? `<td class="num"><span class="dot ${ratioDot(x)}"></span> ${x.rv.toFixed(1)}</td>` : ''}</tr>`).join('')}
       </tbody></table></div>

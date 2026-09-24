@@ -47,8 +47,10 @@ Env (optional, the publishable key and URL are the defaults):
   Row level security enforces it. The screen only mirrors it.
 - The commit note is its own column, so a note never trips the late flag.
 - The week on screen rolls at 12:01am the day after the lock (Wednesday for Elevation), not at
-  the lock. Lock night shows the week just closed, locked, with a "This week did" row so reps
-  can enter what they did. The database still locks and stamps late edits at the lock.
+  the lock. Every screen scores one week, `weekInfo().scoreKey`: the week just closed on lock
+  night, last week the rest of the time. Summit, The Climb, the Branches cards and the rep form
+  all read it, and a test fails if a screen picks its own week. The database still locks and
+  stamps late edits at the lock.
 
 ## Workspace row shape
 

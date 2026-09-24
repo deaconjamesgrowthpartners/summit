@@ -67,13 +67,18 @@ export function displayKeyAt(ws, at = new Date()) {
 export function weekInfo(ws, now = clock.now()) {
   const key = displayKeyAt(ws, now);
   const z = zoned(now, ws.lock_tz);
+  const locked = now > lockAt(ws, key);
   return {
-    key,
+    key,                               // the week on screen, and the week commits go to
     start: addDays(key, -6),
-    prevKey: addDays(key, -7),
+    prevKey: addDays(key, -7),         // data loading only. screens score against scoreKey.
+    // the week every screen scores, committed vs did. on lock night that is
+    // the week just closed. the rest of the week it is last week.
+    scoreKey: locked ? key : addDays(key, -7),
+    scoreLabel: locked ? 'This week' : 'Last week',
     today: z.date,
     year: z.year,
-    locked: now > lockAt(ws, key),
+    locked,
     daysLeft: daysBetween(z.date, key),
   };
 }

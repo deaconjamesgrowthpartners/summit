@@ -1,6 +1,6 @@
 // Fake data shaped exactly like the database. Test names only.
 import { addDays, iso } from '../lib/format.js';
-import { weekKeyAt } from '../lib/time.js';
+import { displayKeyAt } from '../lib/time.js';
 
 const WS = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -94,7 +94,7 @@ export function fixtures(now = new Date()) {
       created_at: now.toISOString(), updated_at: now.toISOString(),
     };
   });
-  const key = weekKeyAt(WS, now), prev = addDays(key, -7);
+  const key = displayKeyAt(WS, now), prev = addDays(key, -7);
   const commits = [];
   reps.forEach((m, i) => {
     const c = { audits: 3 + i, visits: 5, bidsN: 2 + (i % 2), bidsD: 20000 + i * 5000, wonD: 15000, startsD: 10000 };
