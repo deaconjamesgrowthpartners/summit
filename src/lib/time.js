@@ -2,6 +2,9 @@
 // summit_lock_at in migration 001 so the screen and the database agree.
 import { iso, addDays, daysBetween } from './format.js';
 
+// one clock for the whole screen. the demo can move it to check lock night.
+export const clock = { now: () => new Date() };
+
 export function zoned(date, tz) {
   const f = new Intl.DateTimeFormat('en-US', {
     timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -53,8 +56,16 @@ export function lockLabel(ws) {
   return `${day} ${h12}${mi ? ':' + String(mi).padStart(2, '0') : ''}${h < 12 ? 'am' : 'pm'}`;
 }
 
-export function weekInfo(ws, now = new Date()) {
-  const key = weekKeyAt(ws, now);
+// The week the screen shows. The database rolls at the lock (above).
+// The screen holds the finished week through lock night, so reps can
+// enter what they did, and rolls at 12:01am the day after the lock.
+export function displayKeyAt(ws, at = new Date()) {
+  const z = zoned(new Date(at.getTime() - 60000), ws.lock_tz);
+  return addDays(z.date, (ws.lock_dow - z.isodow + 7) % 7);
+}
+
+export function weekInfo(ws, now = clock.now()) {
+  const key = displayKeyAt(ws, now);
   const z = zoned(now, ws.lock_tz);
   return {
     key,
@@ -67,4 +78,4 @@ export function weekInfo(ws, now = new Date()) {
   };
 }
 
-export const isLockedWeek = (ws, wk, now = new Date()) => now > lockAt(ws, wk);
+export const isLockedWeek = (ws, wk, now = clock.now()) => now > lockAt(ws, wk);

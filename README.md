@@ -10,7 +10,7 @@ comes from their `workspaces` row. Nothing about a client is in the code.
 ```
 npm install
 npm run dev        # real Supabase, needs a roster login
-npm run demo       # fake data in memory, no login. ?as=leader or ?as=test.grow.one
+npm run demo       # fake data in memory, no login. ?as=leader|grow1|grow2|bdm1|bdm2, ?now=<ISO time> to pin the clock
 npm test           # week and lock math, must match summit_week_key / summit_lock_at
 npm run build      # production bundle in dist/ (demo code is never included)
 ```
@@ -20,8 +20,11 @@ Env (optional, the publishable key and URL are the defaults):
 
 ## Database
 
-1. `supabase/migrations/002_summit_frontend.sql` runs after 001 in the SQL editor. It adds
-   the new columns, the auth hook, realtime, and Elevation's config and goals.
+1. Run in the SQL editor, in order, after 001:
+   - `002_summit_frontend.sql`: new columns, the auth hook, realtime, Elevation's config and goals.
+   - `003_test_roster_segment_contact.sql`: segment and contact columns, and the 5 test rows moved to
+     joe+leader / joe+grow1 / joe+grow2 / joe+bdm1 / joe+bdm2 @deaconjames.com with their teams.
+     It stops and changes nothing unless Elevation has exactly 1 leader and 4 reps.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
@@ -43,6 +46,9 @@ Env (optional, the publishable key and URL are the defaults):
 - Reps edit their own rows and commits. Leaders edit everything in their workspace.
   Row level security enforces it. The screen only mirrors it.
 - The commit note is its own column, so a note never trips the late flag.
+- The week on screen rolls at 12:01am the day after the lock (Wednesday for Elevation), not at
+  the lock. Lock night shows the week just closed, locked, with a "This week did" row so reps
+  can enter what they did. The database still locks and stamps late edits at the lock.
 
 ## Workspace row shape
 

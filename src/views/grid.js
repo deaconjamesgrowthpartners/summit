@@ -7,10 +7,10 @@ export function renderGrid(rows, { canEdit = () => false, full = false } = {}) {
   if (!rows.length) return '<div class="card empty">Nothing here yet.</div>';
   const cfg = S.cfg, w = wk();
   const cols = full
-    ? ['flag', 'pri', 'account', 'branch', 'owner', 'category', 'value', 'stage', 'prob', 'weighted', 'close_date', 'start_date', 'bid_date', 'next_step', 'next_step_date', 'last_activity', 'crm_ref', 'notes']
+    ? ['flag', 'pri', 'account', 'contact', 'branch', 'owner', 'category', 'segment', 'value', 'stage', 'prob', 'weighted', 'close_date', 'start_date', 'bid_date', 'next_step', 'next_step_date', 'last_activity', 'crm_ref', 'notes']
     : ['flag', 'pri', 'account', 'category', 'value', 'stage', 'close_date', 'start_date', 'next_step', 'next_step_date', 'last_activity', 'crm_ref'];
   const head = {
-    flag: '', pri: '', account: 'Account', branch: 'Branch', owner: 'Rep', category: 'Type', value: 'Est $', stage: 'Stage',
+    flag: '', pri: '', account: 'Account', contact: 'Contact', segment: 'Segment', branch: 'Branch', owner: 'Rep', category: 'Type', value: 'Est $', stage: 'Stage',
     prob: 'Prob', weighted: 'Weighted', close_date: 'Exp. close', start_date: 'Target start', bid_date: 'Bid sent',
     next_step: 'Next step', next_step_date: 'Due', last_activity: 'Last touch', crm_ref: `${cfg.crmLabel} #`, notes: 'Notes',
   };
@@ -27,7 +27,9 @@ export function renderGrid(rows, { canEdit = () => false, full = false } = {}) {
       case 'pri': return isWon(cfg, o)
         ? `<td><button class="ed tog ${o.installed ? 'done' : ''} ${iss.some((i) => i.f === 'installed') ? 'miss' : ''}" ${ro} data-id="${esc(o.id)}" data-k="installed" data-toggle="1" title="Mark installed / started">${o.installed ? '✓ installed' : 'installed?'}</button></td>`
         : `<td><button class="ed tog" ${ro} data-id="${esc(o.id)}" data-k="priority" data-toggle="1" title="Priority account" aria-pressed="${!!o.priority}">${o.priority ? '★' : '☆'}</button></td>`;
-      case 'account': return `<td class="acct"><input class="ed acctname" ${at} value="${esc(o.account)}" aria-label="Account">${full ? '' : `<small>${esc(o.branch)}</small>`}</td>`;
+      case 'account': return `<td class="acct"><input class="ed acctname" ${at} value="${esc(o.account)}" aria-label="Account">${full ? '' : `<small>${esc([o.branch, o.segment, o.contact].filter(Boolean).join(' · '))}</small>`}</td>`;
+      case 'contact': return `<td><input class="ed txt" style="width:160px" ${at} value="${esc(o.contact || '')}" placeholder="name, phone"></td>`;
+      case 'segment': return `<td><input class="ed txt" style="width:150px" ${at} value="${esc(o.segment || '')}"></td>`;
       case 'branch': return `<td><select class="ed" ${at}>${withCur(cfg.branches, o.branch).map((b) => opt(b, o.branch)).join('')}</select></td>`;
       case 'owner': return `<td><select class="ed" ${at}><option value=""></option>${people.map((m) => opt(m.id, o.owner_member_id, m.full_name)).join('')}</select></td>`;
       case 'category': return `<td><select class="ed" ${at}>${o.category ? '' : '<option value=""></option>'}${withCur(cfg.categories.map((x) => x.name), o.category).map((x) => opt(x, o.category)).join('')}</select></td>`;

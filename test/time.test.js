@@ -23,3 +23,18 @@ test('Monday lock in another zone', () => {
   assert.equal(weekKeyAt(w2, new Date('2026-09-28T15:29:00Z')), '2026-09-28'); // Mon 9:29 MDT
   assert.equal(weekKeyAt(w2, new Date('2026-09-28T15:31:00Z')), '2026-10-05');
 });
+
+test('screen holds the finished week through lock night, rolls at 12:01am Wednesday', async () => {
+  const { displayKeyAt, weekInfo } = await import('../src/lib/time.js');
+  const at = (s) => new Date(s);
+  assert.equal(displayKeyAt(ws, at('2026-09-29T20:59:00Z')), '2026-09-29'); // Tue 4:59pm ET
+  const tueNight = weekInfo(ws, at('2026-09-29T22:30:00Z'));              // Tue 6:30pm ET
+  assert.equal(tueNight.key, '2026-09-29');
+  assert.equal(tueNight.locked, true);
+  assert.equal(weekKeyAt(ws, at('2026-09-29T22:30:00Z')), '2026-10-06');  // database already rolled
+  assert.equal(displayKeyAt(ws, at('2026-09-30T04:00:59Z')), '2026-09-29'); // Wed 12:00:59am ET
+  const wed = weekInfo(ws, at('2026-09-30T04:01:00Z'));                   // Wed 12:01am ET
+  assert.equal(wed.key, '2026-10-06');
+  assert.equal(wed.locked, false);
+  assert.equal(wed.prevKey, '2026-09-29');
+});

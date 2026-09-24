@@ -51,25 +51,24 @@ const WS = {
   ],
 };
 
-// the 5 test rows
+// the 5 test rows, same addresses and teams as migration 003
 const MEMBERS = [
-  ['Test Leader', 'leader', null, 'Oakwood'],
-  ['Test Grow One', 'rep', 'grow', 'Oakwood'],
-  ['Test Grow Two', 'rep', 'grow', 'Sugar Hill'],
-  ['Test NetNew One', 'rep', 'netnew', 'Knoxville'],
-  ['Test NetNew Two', 'rep', 'netnew', 'Oakwood'],
+  ['Test Leader', 'leader', null, 'Oakwood', 'leader'],
+  ['Test Grow One', 'rep', 'grow', 'Oakwood', 'grow1'],
+  ['Test Grow Two', 'rep', 'grow', 'Sugar Hill', 'grow2'],
+  ['Test NetNew One', 'rep', 'netnew', 'Knoxville', 'bdm1'],
+  ['Test NetNew Two', 'rep', 'netnew', 'Oakwood', 'bdm2'],
 ];
 
 function rng(seed) { return () => ((seed = (seed * 16807) % 2147483647) / 2147483647); }
 
-export function fixtures() {
+export function fixtures(now = new Date()) {
   const r = rng(42);
   const pick = (a) => a[Math.floor(r() * a.length)];
-  const now = new Date();
   const d = now.toISOString().slice(0, 10);
-  const members = MEMBERS.map(([full_name, role, team, branch], i) => ({
+  const members = MEMBERS.map(([full_name, role, team, branch, tag], i) => ({
     id: `00000000-0000-4000-8000-00000000010${i}`, workspace_id: WS.id, user_id: `00000000-0000-4000-8000-00000000020${i}`,
-    email: `${full_name.toLowerCase().replace(/\s+/g, '.')}@example.test`, full_name, role, team, branch, active: true,
+    email: `joe+${tag}@deaconjames.com`, full_name, role, team, branch, active: true,
   }));
   const reps = members.filter((m) => m.role === 'rep');
   const names = ['Riverside HOA', 'Peachtree Office Park', 'Lakeview Commons', 'Summit Ridge Apartments', 'Oak Hollow Church', 'Hillcrest Medical',
@@ -88,7 +87,8 @@ export function fixtures() {
       value: Math.round((cat === 'Maintenance' ? 20000 + r() * 90000 : 4000 + r() * 40000) / 100) * 100,
       recurring: cat === 'Maintenance', start_date: r() > 0.25 ? off(-10 + r() * 60) : null,
       close_date: s.status === 'open' && r() > 0.2 ? off(-7 + r() * 45) : null, actual_close: won ? off(-r() * 14) : null,
-      installed: won && r() > 0.6, next_step: r() > 0.2 ? pick(['Walk the site with the property manager', 'Send revised bid', 'Follow up on board vote', 'Schedule kickoff', 'Call about budget']) : null,
+      installed: won && r() > 0.6,
+      segment: pick(['HOA', 'Commercial', 'Multifamily', 'Healthcare', 'Municipal']), contact: r() > 0.3 ? pick(['Dana, PM', 'Chris, board chair', 'Sam, facilities', 'Pat, owner']) : null, next_step: r() > 0.2 ? pick(['Walk the site with the property manager', 'Send revised bid', 'Follow up on board vote', 'Schedule kickoff', 'Call about budget']) : null,
       next_step_date: r() > 0.2 ? off(-5 + r() * 14) : null, last_activity: off(-r() * 20), notes: null,
       priority: r() > 0.7, bid_date: s.bid ? off(-r() * 12) : null, stage_date: off(-r() * 10), crm_ref: r() > 0.4 ? String(4400 + i) : null,
       created_at: now.toISOString(), updated_at: now.toISOString(),

@@ -138,7 +138,7 @@ export function renderSummit(el) {
   <div class="sec card">
     <div class="sec-h"><h2 class="s16">Top open deals</h2><span class="sub">By value · ${esc(scopeLabel())}</span></div>
     ${top.length ? `<div class="tw flat"><table><thead><tr><th></th><th>Account</th><th>Rep</th><th>Type</th><th class="num">Est $</th><th>Stage</th><th>Close</th><th>Start</th><th>Next step</th></tr></thead><tbody>
-    ${top.map((o) => `<tr><td><span class="dot ${flag(cfg, o, w.today, S.crm)}"></span></td><td class="acct">${esc(o.account)}<small>${esc(o.branch)}</small></td><td><span class="person">${esc(nameOf(o.owner_member_id))}</span></td><td>${esc(o.category)}</td><td class="num">${money(o.value)}</td><td>${esc(o.stage)}</td><td>${o.close_date ? fmtDate(o.close_date) : '<span class="pill r">missing</span>'}</td><td>${o.start_date ? fmtDate(o.start_date) : '<span class="pill r">missing</span>'}</td><td class="wrap">${esc(o.next_step)}</td></tr>`).join('')}
+    ${top.map((o) => `<tr><td><span class="dot ${flag(cfg, o, w.today, S.crm)}"></span></td><td class="acct">${esc(o.account)}<small>${esc([o.branch, o.segment].filter(Boolean).join(' · '))}</small></td><td><span class="person">${esc(nameOf(o.owner_member_id))}</span></td><td>${esc(o.category)}</td><td class="num">${money(o.value)}</td><td>${esc(o.stage)}</td><td>${o.close_date ? fmtDate(o.close_date) : '<span class="pill r">missing</span>'}</td><td>${o.start_date ? fmtDate(o.start_date) : '<span class="pill r">missing</span>'}</td><td class="wrap">${esc(o.next_step)}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">No open deals yet.</div>'}
   </div>
   ${company && note ? `<p class="note">${esc(note)}</p>` : ''}`;

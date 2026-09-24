@@ -10,7 +10,7 @@ export function renderAccounts(el) {
   let rows = oppsScoped();
   if (fk('q')) {
     const q = fk('q').toLowerCase();
-    rows = rows.filter((o) => [o.account, nameOf(o.owner_member_id), o.notes, o.next_step, o.crm_ref].join(' ').toLowerCase().includes(q));
+    rows = rows.filter((o) => [o.account, o.contact, o.segment, nameOf(o.owner_member_id), o.notes, o.next_step, o.crm_ref].join(' ').toLowerCase().includes(q));
   }
   if (fk('cat')) rows = rows.filter((o) => o.category === fk('cat'));
   if (fk('branch')) rows = rows.filter((o) => o.branch === fk('branch'));
@@ -43,7 +43,7 @@ export function renderAccounts(el) {
   el.innerHTML = `
   <div class="sec-h"><h2>All accounts · ${rows.length}</h2><span class="sub">${open.length} open · ${money(sum(open))} · ${won.length} won · ${money(sum(won))}</span></div>
   <div class="bar">
-    <input type="search" class="ed" data-f="all_q" placeholder="Search account, rep, notes" value="${esc(fk('q'))}" aria-label="Search">
+    <input type="search" class="ed" data-f="all_q" placeholder="Search account, contact, notes" value="${esc(fk('q'))}" aria-label="Search">
     <select class="ed" data-f="all_status"><option value="">Status: all</option>${['open', 'won', 'lost'].map((s) => `<option value="${s}" ${fk('status') === s ? 'selected' : ''}>${s[0].toUpperCase() + s.slice(1)}</option>`).join('')}</select>
     <select class="ed" data-f="all_cat"><option value="">Type: all</option>${cfg.categories.map((c) => `<option ${fk('cat') === c.name ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
     <select class="ed" data-f="all_branch"><option value="">Branch: all</option>${cfg.branches.map((b) => `<option ${fk('branch') === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>

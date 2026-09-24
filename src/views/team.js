@@ -51,6 +51,15 @@ export function renderTeam(el, tab) {
   }).filter(Boolean);
   const ratioDot = (x) => (!x.den ? 'n' : !ratioGoal ? 'n' : x.rv >= ratioGoal ? 'g' : x.rv >= 0.7 * ratioGoal ? 'y' : 'r');
 
+  const didRow = (label, week, c, a) => `<tr><td>${label}</td>${cfg.measures.map((m) => {
+    const com = comValue(c, m.key), did = didValue(c, a, m.key);
+    const manual = c && c.actual && hasVal(c.actual[m.key]);
+    const auto = m.key in a;
+    return `<td class="num"><span class="dot ${c ? ryg(did, com) : 'n'}"></span> <input class="ed num" inputmode="decimal" ${canEdit ? '' : 'disabled'} data-cm="${esc(r.id)}" data-cw="${week}" data-cf="actual" data-ck="${esc(m.key)}" value="${manual ? esc(c.actual[m.key]) : ''}" placeholder="${auto ? esc(fmtM(m, a[m.key])) : '0'}" aria-label="${esc(lab(m))} did"><div class="auto">${auto && !manual ? 'from board' : ''}</div></td>`;
+  }).join('')}</tr>`;
+  // lock night: the week just closed is still on screen. enter what you did.
+  const thisDid = w.locked ? didRow('This week did', w.key, thisC, autoDid(cfg, opps, r.id, w.key)) : '';
+
   const committedAt = thisC && thisC.submitted_at
     ? new Date(thisC.submitted_at).toLocaleString('en-US', { timeZone: cfg.lock_tz, weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
   const late = thisC && thisC.late && !thisC.accepted_by;
@@ -64,17 +73,13 @@ export function renderTeam(el, tab) {
       <div class="sec-h"><h2 class="s16">My week · <span class="person">${esc(r.full_name)}</span>${r.branch ? ' · ' + esc(r.branch) : ''}</h2>${canEdit ? '' : '<span class="ro">view only</span>'}</div>
       <div class="tw bare"><table><thead><tr><th></th>${cfg.measures.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}</tr></thead><tbody>
         <tr><td>Last week committed</td>${cfg.measures.map((m) => `<td class="num">${lastC ? fmtM(m, comValue(lastC, m.key)) : '<span class="m" style="color:var(--muted)">none</span>'}</td>`).join('')}</tr>
-        <tr><td>Last week did</td>${cfg.measures.map((m) => {
-          const com = comValue(lastC, m.key), did = didValue(lastC, lastA, m.key);
-          const manual = lastC && lastC.actual && hasVal(lastC.actual[m.key]);
-          const auto = m.key in lastA;
-          return `<td class="num"><span class="dot ${lastC ? ryg(did, com) : 'n'}"></span> <input class="ed num" inputmode="decimal" ${dis(w.prevKey)} data-cm="${esc(r.id)}" data-cw="${w.prevKey}" data-cf="actual" data-ck="${esc(m.key)}" value="${manual ? esc(lastC.actual[m.key]) : ''}" placeholder="${auto ? esc(fmtM(m, lastA[m.key])) : '0'}" aria-label="${esc(lab(m))} did"><div class="auto">${auto && !manual ? 'from board' : ''}</div></td>`;
-        }).join('')}</tr>
-        <tr><td>This week I commit to</td>${cfg.measures.map((m) => `<td class="num"><input class="ed num ${late ? 'late' : ''}" inputmode="decimal" ${dis(w.key)} data-cm="${esc(r.id)}" data-cw="${w.key}" data-cf="committed" data-ck="${esc(m.key)}" value="${thisC && hasVal(thisC.committed?.[m.key]) ? esc(thisC.committed[m.key]) : ''}" placeholder="${m.money ? '$' : '#'}" aria-label="${esc(lab(m))} commit"></td>`).join('')}</tr>
+        ${didRow('Last week did', w.prevKey, lastC, lastA)}
+        <tr><td>${w.locked ? 'This week committed' : 'This week I commit to'}</td>${cfg.measures.map((m) => `<td class="num"><input class="ed num ${late ? 'late' : ''}" inputmode="decimal" ${dis(w.key)} data-cm="${esc(r.id)}" data-cw="${w.key}" data-cf="committed" data-ck="${esc(m.key)}" value="${thisC && hasVal(thisC.committed?.[m.key]) ? esc(thisC.committed[m.key]) : ''}" placeholder="${m.money ? '$' : '#'}" aria-label="${esc(lab(m))} commit"></td>`).join('')}</tr>
+        ${thisDid}
       </tbody></table></div>
       <div class="row-actions">
         ${thisC ? `<span class="pill ${late ? 'y' : 'g'}">Committed${committedAt ? ' ' + esc(committedAt) : ''}${late ? ' · edited after lock' : ''}</span>` : `<span class="pill ${w.locked ? 'r' : 'n'}">${w.locked ? 'No commit this week' : 'Not committed yet'}</span>`}
-        <span class="help">${cfg.measures.length} numbers. Two minutes. Type them and they save. ${w.locked ? 'The week is locked; edits now show as late.' : `Locks ${esc(lockLabel(cfg))}.`}</span>
+        <span class="help">${cfg.measures.length} numbers. Two minutes. Type them and they save. ${w.locked ? 'Commits are locked. Changes show as late. Enter what you did before midnight.' : `Locks ${esc(lockLabel(cfg))}.`}</span>
       </div>
       <div style="margin-top:8px"><input class="ed txt wide" ${dis(w.key)} data-cm="${esc(r.id)}" data-cw="${w.key}" data-cf="note" placeholder="${esc(tab.note_prompt || 'What do you need this week?')}" value="${esc(thisC?.note || '')}" aria-label="Note"></div>
     </div>
