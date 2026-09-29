@@ -5,6 +5,7 @@ import { mLabel } from '../data/workspace.js';
 import { lockLabel, isLockedWeek } from '../lib/time.js';
 import { isOpen, isWon, stageOf, ryg, autoDid, didValue, comValue, hasVal, flag } from '../lib/rules.js';
 import { renderGrid, canEditOpp } from './grid.js';
+import { renderBook } from './book.js';
 
 export function renderTeam(el, tab) {
   const cfg = S.cfg, w = wk(), team = tab.team, opps = oppsAll();
@@ -90,8 +91,10 @@ export function renderTeam(el, tab) {
     </div>
   </div>
 
+  ${cfg.book && cfg.book.tab === tab.key ? renderBook(r, `book_${team}`) : ''}
+
   <div class="sec">
-    <div class="sec-h"><h2 class="s16">My accounts · ${rows.length}</h2>
+    <div class="sec-h"><h2 class="s16">My opportunities · ${rows.length}</h2>
       <div class="bar tight">
         <select class="ed" data-f="${team}_sort"><option value="start" ${sortK === 'start' ? 'selected' : ''}>Sort: start date</option><option value="value" ${sortK === 'value' ? 'selected' : ''}>Sort: deal size</option><option value="flag" ${sortK === 'flag' ? 'selected' : ''}>Sort: flag</option></select>
         <select class="ed" data-f="${team}_size"><option value="">Deal size: all</option>${[5000, 25000, 100000].map((v) => `<option value="${v}" ${fk('size') === String(v) ? 'selected' : ''}>${money(v)}+</option>`).join('')}</select>

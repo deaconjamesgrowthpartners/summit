@@ -25,6 +25,8 @@ Env (optional, the publishable key and URL are the defaults):
    - `003_test_roster_segment_contact.sql`: segment and contact columns, and the 5 test rows moved to
      joe+leader / joe+grow1 / joe+grow2 / joe+bdm1 / joe+bdm2 @deaconjames.com with their teams.
      It stops and changes nothing unless Elevation has exactly 1 leader and 4 reps.
+   - `006_book_config.sql` (after 005, which made the `accounts` table): realtime on `accounts`, plus the
+     book block on the Grow tab and the book tiles on the Summit tab.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
@@ -61,5 +63,8 @@ Env (optional, the publishable key and URL are the defaults):
   (`title`, `sub`, `team_label`, `note`, `note_prompt`, `branch_note`, `branch_measures`, `ratio`, `crm_label`)
 - `stages[]`: `name`, `prob`, `status` (open|won|lost), `needs_close`, `bid`, `hold`
 - `categories[]`: `name`, `recurring`, `default_for` (grow|netnew)
+- `tabs[].book` (on one team tab): `label`, `audit_days`, `levels[]` (`value`, `color` g|y|r), `risk[]` (levels that count as at risk).
+  A row is red past the audit window or at a red level, yellow at a yellow level or with no audit on record.
+- `tabs[summit].tiles[]`: `type` (book_value | book_at_risk), `label`. They follow the Viewing scope.
 - `goal_tiles[]`: `key`, `label`, `source` (won_recurring|manual), `goal`, `actual`, `as_of`,
   `deadline`, `coverage`. The values live in `goals.values` for the current year.

@@ -50,6 +50,20 @@ export function normalize(ws) {
     .map((g) => ({ ...g, source: g.source === 'won_recurring' ? 'won_recurring' : 'manual' }));
 
   const teamTab = Object.fromEntries(tabs.filter((t) => t.team).map((t) => [t.team, t]));
+
+  // the account book. lives on whichever team tab carries a "book" block.
+  const bookTab = tabs.find((t) => t.book && typeof t.book === 'object');
+  const b = bookTab ? obj(bookTab.book) : null;
+  const book = b ? {
+    tab: bookTab.key,
+    label: b.label || 'Book',
+    audit_days: +b.audit_days > 0 ? +b.audit_days : 90,
+    levels: arr(b.levels).map(obj).filter((l) => l.value).map((l) => ({ value: String(l.value), color: ['g', 'y', 'r'].includes(l.color) ? l.color : 'n' })),
+    risk: arr(b.risk).map(String),
+    note: b.note || '',
+  } : null;
+  const summitTab = tabs.find((t) => t.key === 'summit') || {};
+  const summitTiles = arr(summitTab.tiles).map(obj).filter((x) => x.type && x.label);
   const check = tabs.find((t) => t.key === 'datacheck') || {};
 
   return {
@@ -65,6 +79,8 @@ export function normalize(ws) {
     catBy,
     goalTiles,
     teamTab,
+    book,
+    summitTiles,
     crmLabel: check.crm_label || 'CRM',
     branches: arr(ws.branches).map(String),
     lock_dow: +ws.lock_dow || 2,

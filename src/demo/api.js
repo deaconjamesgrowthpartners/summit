@@ -26,7 +26,7 @@ export async function signOut() { user = null; authCb(null); }
 export async function workspaces() { return db.workspaces.map(({ id, slug, name }) => ({ id, slug, name })); }
 export async function workspace(slug) { return clone(db.workspaces.find((w) => w.slug === slug) || null); }
 export async function isAdmin() { return false; }
-export async function load() { return clone({ members: db.members, opps: db.opps, commits: db.commits, goals: db.goals }); }
+export async function load() { return clone({ members: db.members, opps: db.opps, commits: db.commits, goals: db.goals, accounts: db.accounts }); }
 export function subscribe(_ws, onChange, onStatus) {
   listeners.push(onChange);
   setTimeout(() => onStatus && onStatus('SUBSCRIBED'), 10);
@@ -47,6 +47,12 @@ export async function updateOpp(id, patch) {
   if (!r) throw { code: 'PGRST116' };
   guardOpp(r); guardOpp({ ...r, ...patch });
   Object.assign(r, patch, { updated_at: new Date().toISOString() }); emit('opps', 'UPDATE', r); return clone(r);
+}
+export async function updateAccount(id, patch) {
+  const r = db.accounts.find((a) => a.id === id);
+  if (!r) throw { code: 'PGRST116' };
+  guardOpp(r);
+  Object.assign(r, patch); emit('accounts', 'UPDATE', r); return clone(r);
 }
 export async function insertCommit(row) {
   const r = { ...row, submitted_at: new Date().toISOString(), updated_at: new Date().toISOString(), late: false, accepted_by: null };

@@ -58,19 +58,21 @@ export async function isAdmin(userId) {
   return rows.length > 0;
 }
 export async function load(wsId, sinceWeek) {
-  const [members, opps, commits, goals] = await Promise.all([
+  const [members, opps, commits, goals, accounts] = await Promise.all([
     all(() => sb.from('members').select('*').eq('workspace_id', wsId).order('full_name')),
     all(() => sb.from('opps').select('*').eq('workspace_id', wsId).order('created_at')),
     all(() => sb.from('commits').select('*').eq('workspace_id', wsId).gte('week_key', sinceWeek)),
     all(() => sb.from('goals').select('*').eq('workspace_id', wsId)),
+    // the book is optional. a workspace without one still loads.
+    all(() => sb.from('accounts').select('*').eq('workspace_id', wsId).order('property')).catch(() => []),
   ]);
-  return { members, opps, commits, goals };
+  return { members, opps, commits, goals, accounts };
 }
 
 /* ---------- live ---------- */
 export function subscribe(wsId, onChange, onStatus) {
   const ch = sb.channel(`summit-${wsId}`);
-  for (const table of ['opps', 'commits', 'goals']) {
+  for (const table of ['opps', 'commits', 'goals', 'accounts']) {
     ch.on('postgres_changes', { event: '*', schema: 'public', table, filter: `workspace_id=eq.${wsId}` },
       (p) => onChange(table, p.eventType, p.new, p.old));
   }
@@ -84,6 +86,9 @@ export async function insertOpp(row) {
 }
 export async function updateOpp(id, patch) {
   return must(await sb.from('opps').update(patch).eq('id', id).select().single());
+}
+export async function updateAccount(id, patch) {
+  return must(await sb.from('accounts').update(patch).eq('id', id).select().single());
 }
 export async function insertCommit(row) {
   return must(await sb.from('commits').insert(row).select().single());

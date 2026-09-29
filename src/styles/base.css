@@ -109,6 +109,7 @@ input.ed.acctname{font-weight:600;width:170px}
 input.ed.wide{width:100%}
 .ed.miss{border-color:var(--red);background:var(--redBg)}
 .ed.late{border-color:var(--yellow)}
+.ed.warn{border-color:var(--yellow);background:var(--yellowBg)}
 .tog{min-width:0;padding:2px 6px;cursor:pointer;font-size:12px}
 .tog:disabled{cursor:default}
 .tog.done{color:var(--ok)}

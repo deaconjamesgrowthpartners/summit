@@ -33,12 +33,14 @@ const WS = {
     { key: 'startsD', type: 'money', label: 'Starting next week $', label_grow: 'Starting next week $', label_netnew: 'Installing next week $', auto: 'starts_next_week_value' },
   ],
   tabs: [
-    { key: 'summit', label: 'Summit', note: 'Goals: new maintenance plus current-client growth by Sept 30 (July 9 offsite). Enhancement growth comes from Aspire and is updated by leadership on the Data Check tab.' },
+    { key: 'summit', label: 'Summit', tiles: [{ type: 'book_value', label: 'Maintenance book' }, { type: 'book_at_risk', label: 'Accounts at risk' }], note: 'Goals: new maintenance plus current-client growth by Sept 30 (July 9 offsite). Enhancement growth comes from Aspire and is updated by leadership on the Data Check tab.' },
     { key: 'climb', label: 'The Climb' },
     { key: 'grow', label: 'Grow', team: 'grow', title: 'Grow', sub: 'existing clients, enhancements', team_label: 'Account Managers',
       note_prompt: 'What do you need from Allan, Brooks or ops this week?', branch_measures: ['audits', 'bidsN', 'bidsD', 'wonD'],
       ratio: { label: 'Bids/audit', num: 'bidsN', den: 'audits', goal: 'bidsPerAudit', sub: 'standard: 1 bid per site audit' },
-      branch_note: "Allan's standard: find one thing to propose at every site audit." },
+      branch_note: "Allan's standard: find one thing to propose at every site audit.",
+      book: { label: 'Maintenance book', audit_days: 90, risk: ['Yellow', 'Red'],
+        levels: [{ value: 'Green', color: 'g' }, { value: 'Yellow', color: 'y' }, { value: 'Red', color: 'r' }] } },
     { key: 'netnew', label: 'Net New', team: 'netnew', title: 'Net New', sub: 'new maintenance and install contracts', team_label: 'BDMs',
       note_prompt: 'What do you need from Allan, Brooks or ops this week?', branch_measures: ['audits', 'bidsN', 'bidsD', 'wonD'],
       branch_note: 'Expected close and target start are required once a bid is out. That is what feeds the cash ladder.' },
@@ -104,5 +106,20 @@ export function fixtures(now = new Date()) {
       actual: {}, note: '', submitted_at: now.toISOString(), late: false, accepted_by: null, updated_at: now.toISOString() });
   });
   const goals = [{ workspace_id: WS.id, period: String(now.getFullYear()), values: { newMaintGoal: 706000, growthGoal: 480000, growthActual: 149994, growthAsOf: 'Aug 2026 Aspire pull', deadline: iso(now.getFullYear(), 9, 30), bidsPerAudit: 1.0 } }];
-  return { workspaces: [WS], members, opps, commits, goals };
+  // the maintenance book, split across the grow reps
+  const props = ['Oakmont HOA', 'Riverbend Office Park', 'Lakeside Village', 'Peachtree Commons', 'Magnolia Terrace', 'Harbor Pointe', 'Stone Mountain Plaza',
+    'Cedar Grove Condos', 'Willow Park', 'Brookstone Medical', 'Sugarloaf Estates', 'Northpoint Center', 'Laurel Ridge', 'Hidden Creek HOA', 'Cypress Landing', 'Ashton Place'];
+  const growReps = members.filter((m) => m.team === 'grow');
+  const accounts = props.map((property, i) => {
+    const o = growReps[i % growReps.length];
+    return {
+      id: `00000000-0000-4000-8000-${String(5000 + i).padStart(12, '0')}`, workspace_id: WS.id, owner_member_id: o.id, property,
+      annual_value: Math.round((12000 + r() * 60000) / 100) * 100,
+      contact_name: pick(['Dana Reyes', 'Chris Patel', 'Sam Ortiz', 'Pat Nguyen', 'Jordan Blake']), contact_email: `pm${i}@example.test`, contact_phone: `404-555-01${String(i).padStart(2, '0')}`,
+      last_audit: r() > 0.1 ? addDays(d, -Math.round(r() * 140)) : null, last_meeting: addDays(d, -Math.round(r() * 60)),
+      next_meeting: r() > 0.3 ? addDays(d, Math.round(r() * 30)) : null,
+      satisfaction: pick(['Green', 'Green', 'Green', 'Yellow', 'Red']), notes: null,
+    };
+  });
+  return { workspaces: [WS], members, opps, commits, goals, accounts };
 }

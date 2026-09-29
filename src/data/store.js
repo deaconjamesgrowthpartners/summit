@@ -10,6 +10,7 @@ export const S = {
   members: [],
   opps: {},           // id -> row
   commits: {},        // `${member_id}|${week_key}` -> row
+  accounts: {},       // the book, id -> row
   goalsRow: null,     // { period, values }
   view: 'summit',
   scope: 'company',   // 'company' | 'branch:<name>' | 'member:<id>'
@@ -50,6 +51,8 @@ function scopeMatch(branch, memberId) {
 export const oppsAll = () => Object.values(S.opps);
 export const oppsScoped = () => oppsAll().filter((o) => scopeMatch(o.branch, o.owner_member_id));
 export const repsScoped = () => reps().filter((r) => scopeMatch(r.branch, r.id));
+// the book has no branch column. an account sits in its owner's branch.
+export const accountsScoped = () => Object.values(S.accounts).filter((a) => scopeMatch(memberById(a.owner_member_id)?.branch, a.owner_member_id));
 
 export function tabFor(key) {
   return S.cfg.tabs.find((t) => t.key === key) || null;

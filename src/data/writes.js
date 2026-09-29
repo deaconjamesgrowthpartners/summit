@@ -94,6 +94,36 @@ export async function addOpp(ownerId, team) {
   return row.id;
 }
 
+/* ---------- the book ---------- */
+export function writeAccount(id, patch) {
+  const a = S.accounts[id];
+  if (!a) return;
+  Object.assign(a, patch);
+  const key = `acct:${id}`;
+  queued[key] = { ...(queued[key] || {}), ...patch };
+  clearTimeout(timers[key]);
+  timers[key] = setTimeout(() => {
+    const p = queued[key];
+    delete queued[key];
+    if (!p) return;
+    chain(key, async () => {
+      try {
+        const row = await S.api.updateAccount(id, p);
+        S.accounts[id] = { ...S.accounts[id], ...row, ...(queued[key] || {}) };
+        toast('Saved');
+      } catch (e) {
+        toast(explain(e));
+        try {
+          const d = await S.api.load(S.cfg.id, wk().prevKey);
+          const fresh = (d.accounts || []).find((x) => x.id === id);
+          if (fresh) S.accounts[id] = fresh;
+        } catch { /* keep what we have */ }
+      }
+      rerender();
+    });
+  }, 350);
+}
+
 /* ---------- commits ---------- */
 // field: 'committed' | 'actual' | 'note'
 export function writeCommit(memberId, week, field, k, val) {

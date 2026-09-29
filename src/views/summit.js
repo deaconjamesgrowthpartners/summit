@@ -1,4 +1,5 @@
-import { S, wk, goals, isCompany, scopeLabel, oppsScoped, repsScoped, commitFor, nameOf, tabFor } from '../data/store.js';
+import { S, wk, goals, isCompany, scopeLabel, oppsScoped, repsScoped, commitFor, nameOf, tabFor, accountsScoped } from '../data/store.js';
+import { bookTile } from './book.js';
 import { esc, money, pct, fmtDate, addDays, dow, daysBetween, validDate } from '../lib/format.js';
 import { mLabel } from '../data/workspace.js';
 import { isOpen, isWon, isLost, isRecurring, weighted, bidOut, sum, ryg, autoDid, didValue, comValue, flag, rowIssues } from '../lib/rules.js';
@@ -106,6 +107,7 @@ export function renderSummit(el) {
   <div class="tiles">
     ${tile('big', `Signed ${yr}`, money(sum(won)), `${won.length} contracts · ${money(sum(recurring))} recurring · ${money(sum(won) - sum(recurring))} one-time`)}
     ${goalHtml}
+    ${cfg.summitTiles.map((t) => bookTile(t, accountsScoped(), w.today)).join('')}
     ${tile('', 'Open pipeline', money(sum(open)), `${open.length} opportunities · ${money(sum(open, (o) => weighted(cfg, o)))} weighted`)}
     ${covHtml}
     ${tile('', 'Win rate', `${winRate}%`, `${won.length} won · ${lost.length} lost`)}

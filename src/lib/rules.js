@@ -82,6 +82,25 @@ export function flag(cfg, o, today, crm) {
   return iss.length ? 'y' : 'g';
 }
 
+// an account in the book: what is wrong with it and how loud to say it.
+// red: satisfaction marked red, or the last audit is past the window.
+// yellow: satisfaction marked yellow, or no audit on record.
+export function bookIssues(cfg, a, today) {
+  const bk = cfg.book;
+  if (!bk) return [];
+  const iss = [];
+  const lvl = bk.levels.find((l) => l.value === a.satisfaction);
+  if (a.satisfaction && bk.risk.includes(a.satisfaction)) iss.push({ t: `Satisfaction ${a.satisfaction}`, f: 'satisfaction', sev: lvl && lvl.color === 'r' ? 'r' : 'y' });
+  if (!validDate(a.last_audit)) iss.push({ t: 'No audit on record', f: 'last_audit', sev: 'y' });
+  else if (daysBetween(a.last_audit, today) > bk.audit_days) iss.push({ t: `Last audit over ${bk.audit_days} days`, f: 'last_audit', sev: 'r' });
+  return iss;
+}
+export function bookFlag(cfg, a, today) {
+  const iss = bookIssues(cfg, a, today);
+  return iss.some((i) => i.sev === 'r') ? 'r' : iss.length ? 'y' : 'g';
+}
+export const atRisk = (cfg, a, today) => bookIssues(cfg, a, today).length > 0;
+
 // parse a pasted CRM export: id, status, value. tab or comma separated
 export function parseCrm(txt) {
   const map = {};

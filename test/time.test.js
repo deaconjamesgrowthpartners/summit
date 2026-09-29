@@ -58,3 +58,16 @@ test('no screen picks its own week: views read scoreKey and key only', async () 
   const offenders = readdirSync(dir).filter((f) => /prevKey|weekKeyAt|displayKeyAt/.test(readFileSync(new URL(f, dir), 'utf8')));
   assert.deepEqual(offenders, []);
 });
+
+test('book flags: audit window and satisfaction, from config', async () => {
+  const { bookIssues, bookFlag } = await import('../src/lib/rules.js');
+  const cfg = { book: { audit_days: 90, risk: ['Yellow', 'Red'],
+    levels: [{ value: 'Green', color: 'g' }, { value: 'Yellow', color: 'y' }, { value: 'Red', color: 'r' }] } };
+  const today = '2026-09-29';
+  assert.equal(bookFlag(cfg, { satisfaction: 'Green', last_audit: '2026-07-01' }, today), 'g'); // 90 days exactly
+  assert.equal(bookFlag(cfg, { satisfaction: 'Green', last_audit: '2026-06-30' }, today), 'r'); // 91 days
+  assert.equal(bookFlag(cfg, { satisfaction: 'Yellow', last_audit: '2026-09-01' }, today), 'y');
+  assert.equal(bookFlag(cfg, { satisfaction: 'Red', last_audit: '2026-09-01' }, today), 'r');
+  assert.equal(bookFlag(cfg, { satisfaction: 'Green', last_audit: null }, today), 'y');
+  assert.equal(bookIssues({ book: null }, { satisfaction: 'Red' }, today).length, 0); // no book, no flags
+});

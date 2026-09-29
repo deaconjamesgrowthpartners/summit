@@ -1,7 +1,7 @@
 import './styles/base.css';
 import { S, wk, ckey, isLeader, memberById, pickGoals, tabFor } from './data/store.js';
 import { normalize } from './data/workspace.js';
-import { writeOpp, writeCommit, writeGoal, addOpp, acceptLate, onSaved } from './data/writes.js';
+import { writeOpp, writeCommit, writeGoal, writeAccount, addOpp, acceptLate, onSaved } from './data/writes.js';
 import { $, toast, num, addDays } from './lib/format.js';
 import { applyBrand } from './lib/theme.js';
 import { stageOf, parseCrm, isWon } from './lib/rules.js';
@@ -80,7 +80,7 @@ async function boot() {
 function teardown() {
   if (unsub) unsub();
   unsub = null;
-  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, commits: {}, goalsRow: null, filters: {}, sort: {}, crm: null });
+  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, commits: {}, accounts: {}, goalsRow: null, filters: {}, sort: {}, crm: null });
   applyBrand({});
 }
 
@@ -123,6 +123,7 @@ async function openWorkspace(slug) {
   if (!S.me && !S.admin) { teardown(); return renderGate(app, { title: 'Nothing here', body: 'Check the link, or sign in with the email your team uses.' }); }
   S.opps = Object.fromEntries(data.opps.map((o) => [o.id, o]));
   S.commits = Object.fromEntries(data.commits.map((c) => [ckey(c.member_id, c.week_key), c]));
+  S.accounts = Object.fromEntries((data.accounts || []).map((a) => [a.id, a]));
   S.goalsRow = pickGoals(data.goals, w.year);
   S.scope = 'company';
   try { const sc = localStorage.getItem(`summit.scope.${S.cfg.id}`); if (sc) S.scope = sc; } catch { /* private mode */ }
@@ -145,6 +146,7 @@ async function refresh() {
     S.members = data.members;
     S.opps = Object.fromEntries(data.opps.map((o) => [o.id, o]));
     S.commits = Object.fromEntries(data.commits.map((c) => [ckey(c.member_id, c.week_key), c]));
+    S.accounts = Object.fromEntries((data.accounts || []).map((a) => [a.id, a]));
     S.goalsRow = pickGoals(data.goals, wk().year) || S.goalsRow;
     renderSoon();
   } catch { /* try again next time */ }
@@ -169,6 +171,9 @@ function onLive(table, type, row, old) {
       // keep local text if this person is mid-edit on it
       S.commits[k] = mine && mine._new ? mine : { ...row };
     }
+  } else if (table === 'accounts') {
+    if (type === 'DELETE') delete S.accounts[old?.id];
+    else if (row) S.accounts[row.id] = { ...S.accounts[row.id], ...row };
   } else if (table === 'goals' && row) {
     if (!S.goalsRow || S.goalsRow.period === row.period) S.goalsRow = row;
   }
@@ -226,6 +231,15 @@ document.addEventListener('change', (e) => {
   if (t.dataset.cm) {
     const v = t.dataset.cf === 'note' ? t.value : num(t.value);
     writeCommit(t.dataset.cm, t.dataset.cw, t.dataset.cf, t.dataset.ck, v);
+    return renderSoon();
+  }
+  if (t.dataset.acct && t.dataset.k) {
+    const k = t.dataset.k;
+    let v = t.value;
+    if (t.dataset.type === 'num') v = num(v) || 0;
+    if (t.type === 'date' || k === 'satisfaction') v = v || null;
+    if (k === 'property' && !String(v).trim()) { toast('Property needs a name'); return renderAll(); }
+    writeAccount(t.dataset.acct, { [k]: v });
     return renderSoon();
   }
   if (t.dataset.id && t.dataset.k && !t.dataset.toggle) {
