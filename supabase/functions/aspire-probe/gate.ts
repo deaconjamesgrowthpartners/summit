@@ -7,7 +7,7 @@
 // Everyone else is refused, with the result of every check, so a failure says why.
 // Never echoes a key or a token. Only its kind and length.
 
-type Fetch = (url: string, init?: any) => Promise<any>;
+type GateFetch = (url: string, init?: any) => Promise<any>;
 export interface GateEnv {
   SUPABASE_URL?: string;
   SUPABASE_ANON_KEY?: string;
@@ -33,7 +33,7 @@ export function jwtClaims(t: string): any | null {
   }
 }
 
-export async function authorize(authHeader: string | null, env: GateEnv, f: Fetch = (u, i) => fetch(u, i)) {
+export async function authorize(authHeader: string | null, env: GateEnv, f: GateFetch = (u, i) => fetch(u, i)) {
   const checks: Record<string, string> = {};
   const token = (authHeader || '').replace(/^Bearer\s+/i, '').trim();
   const url = (env.SUPABASE_URL || '').replace(/\/+$/, '');

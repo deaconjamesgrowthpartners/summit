@@ -148,3 +148,10 @@ test('the dashboard copy is up to date with the source', async () => {
   const { bundle } = await import('../scripts/bundle-probe.mjs');
   assert.equal(readFileSync(new URL('../supabase/dashboard/aspire-probe.ts', import.meta.url), 'utf8'), bundle(), 'run npm run bundle:probe');
 });
+
+test('the dashboard copy declares every top-level name once', async () => {
+  const { bundle } = await import('../scripts/bundle-probe.mjs');
+  const names = [...bundle().matchAll(/^(?:export )?(?:async )?(?:const|let|function|type|interface|class) (\w+)/gm)].map((m) => m[1]);
+  const dupes = names.filter((n, i) => names.indexOf(n) !== i);
+  assert.deepEqual(dupes, []);
+});
