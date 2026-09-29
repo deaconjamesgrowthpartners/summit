@@ -1,22 +1,27 @@
-// workspaces.brand -> CSS variables. Nothing about any client lives in CSS.
-const COLOR = /^#[0-9a-f]{3,8}$/i;
-const MAP = { head: '--head', accent: '--accent', bg: '--bg', panel: '--panel', muted: '--muted', surface: '--surface', ink: '--ink', ink2: '--ink2' };
+// workspaces.brand -> design tokens. Nothing about any client lives in CSS.
+// The tokens go in a stylesheet, not inline styles, so dark mode can
+// replace every one of them. Inline values would beat the media query
+// and leave light text on a light page.
+import { palette, css } from './palette.js';
 
 export function applyBrand(brand = {}) {
-  const root = document.documentElement.style;
-  for (const [k, v] of Object.entries(MAP)) {
-    if (COLOR.test(brand[k] || '')) root.setProperty(v, brand[k]);
-    else root.removeProperty(v);
+  let tag = document.getElementById('brand-tokens');
+  if (!tag) {
+    tag = document.createElement('style');
+    tag.id = 'brand-tokens';
+    document.head.appendChild(tag);
   }
-  if (COLOR.test(brand.accent || '')) root.setProperty('--brandAccent', brand.accent);
+  const p = palette(brand);
+  tag.textContent = css(p);
+
+  const root = document.documentElement.style;
   const font = String(brand.font || '').replace(/[^A-Za-z0-9 ]/g, '').trim();
   if (font) {
     root.setProperty('--font', `"${font}",Arial,Helvetica,sans-serif`);
-    const id = 'brand-font';
-    let link = document.getElementById(id);
+    let link = document.getElementById('brand-font');
     if (!link) {
       link = document.createElement('link');
-      link.id = id;
+      link.id = 'brand-font';
       link.rel = 'stylesheet';
       document.head.appendChild(link);
     }
@@ -25,7 +30,7 @@ export function applyBrand(brand = {}) {
     root.removeProperty('--font');
   }
   const meta = document.querySelector('meta[name=theme-color]') || document.head.appendChild(Object.assign(document.createElement('meta'), { name: 'theme-color' }));
-  meta.content = COLOR.test(brand.head || '') ? brand.head : '#2B2B2B';
+  meta.content = p.light.head;
 }
 
 export function safeLogo(url) {

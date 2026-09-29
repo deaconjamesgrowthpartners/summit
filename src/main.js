@@ -64,6 +64,7 @@ onSaved(renderSoon);
 
 /* ---------------- boot ---------------- */
 async function boot() {
+  applyBrand({}); // neutral tokens for the login screen, before any workspace is known
   api = import.meta.env.VITE_DEMO === '1' ? await import('./demo/api.js') : await import('./data/api.js');
   S.api = api;
   api.onAuth((s) => {

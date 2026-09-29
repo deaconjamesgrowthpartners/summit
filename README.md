@@ -45,6 +45,11 @@ Env (optional, the publishable key and URL are the defaults):
 - The app sends no email. The only email is the login code Supabase sends to the
   person who asked for it.
 - Red and yellow go on numbers and rows. A person's name is always plain ink.
+- Contrast is computed, not picked. `src/lib/palette.js` turns the brand colors into light and dark token
+  sets and fits every text token against every background it can sit on, so each pair clears 4.5:1
+  (body ink clears 7:1). Light mode is always light ground with dark ink, dark mode the reverse, whatever
+  the brand says. `test/contrast.test.js` checks every pair for several very different brands. Never
+  dim text with opacity. Use `--ink2`, `--muted` or `--headText2`.
 - Reps edit their own rows and commits. Leaders edit everything in their workspace.
   Row level security enforces it. The screen only mirrors it.
 - The commit note is its own column, so a note never trips the late flag.
