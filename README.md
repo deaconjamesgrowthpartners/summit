@@ -73,3 +73,33 @@ Env (optional, the publishable key and URL are the defaults):
 - `tabs[summit].tiles[]`: `type` (book_value | book_at_risk), `label`. They follow the Viewing scope.
 - `goal_tiles[]`: `key`, `label`, `source` (won_recurring|manual), `goal`, `actual`, `as_of`,
   `deadline`, `coverage`. The values live in `goals.values` for the current year.
+
+## Aspire probe (discovery only)
+
+`supabase/functions/aspire-probe` logs in to Aspire and reports the shape of its data. It writes
+nothing, to Aspire or to Summit. Every data call is a GET. The only POST is the login handshake, to a
+fixed list of token paths, and the network wrapper refuses anything else before it is sent. There's a
+hard cap of 70 calls, 350ms between calls, and backoff on 429. The report shows field names and types,
+never record values, except the rep, branch and division fields, which show up to 3 examples. The
+secret, the client id and the token never appear in the report.
+
+What it reports:
+1. Which login worked. It tries OAuth client credentials at `/connect/token`, `/oauth/token` and
+   `/token` first, then Aspire's `POST /Authorization { ClientId, Secret }`. It proves the token with
+   one GET, and reports the token field, the header format, the expiry and whether a refresh token came back.
+2. Per endpoint (Opportunities, Properties, Contracts, Contacts, Invoices, Divisions, plus Branches
+   and OpportunityStatuses): whether it exists, the record count (`$count`), the field names and types
+   on one record, and whether a modified-since `$filter` works. It proves the filter is applied, not
+   just accepted: a year-2100 cutoff must return nothing.
+3. Open opportunities or only sold work: the statuses in the 500 most recent, plus an exact count
+   of rows with no won date and no lost date.
+4. Which fields identify the rep, the branch and the division, with examples.
+
+Run it:
+```
+supabase functions deploy aspire-probe --project-ref tyrtzxnhwjchtemytfxv
+```
+Then in the dashboard: Edge Functions > aspire-probe > Test, with the service role. Or call the
+function URL signed in as a Summit admin. Add `?format=text` for the summary lines only.
+Only a Summit admin or the service role can run it. Everyone else gets 403.
+`npm test` runs the probe against a simulated Aspire (`test/aspire-probe.test.js`).
