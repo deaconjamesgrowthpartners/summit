@@ -131,3 +131,20 @@ test('bad credentials: returns a report instead of throwing, touches no data', a
   assert.match(r.summary[0], /nothing worked/);
   assert.ok(w.seen.every((c) => c.method === 'POST'));
 });
+
+test('time budget: a slow, throttling Aspire still gets a report back before the cutoff', async () => {
+  let t = 0;
+  const w = world();
+  const slow = async (u, i) => { t += 4000; return w.fetch(u, i); }; // every call takes 4s
+  const r = await probe({ clientId: ID, secret: SECRET, fetch: slow, sleep: async (ms) => { t += ms; }, clock: () => t, deadlineMs: 60_000 });
+  assert.equal(r.stopped_early, true);
+  assert.ok(r.seconds <= 70, `ran ${r.seconds}s`);
+  assert.ok(r.summary.some((l) => /Stopped early/.test(l)));
+  assert.ok(r.auth.worked, 'auth still reported');
+});
+
+test('the dashboard copy is up to date with the source', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { bundle } = await import('../scripts/bundle-probe.mjs');
+  assert.equal(readFileSync(new URL('../supabase/dashboard/aspire-probe.ts', import.meta.url), 'utf8'), bundle(), 'run npm run bundle:probe');
+});
