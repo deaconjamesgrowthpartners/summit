@@ -1,7 +1,8 @@
 // The probe against a simulated Aspire. No network. Proves the logic, not Aspire's real shape.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { probe, AUTH_ATTEMPTS } from '../supabase/functions/aspire-probe/probe.ts';
+import { probe } from '../supabase/functions/aspire-probe/probe.ts';
+import { AUTH_ATTEMPTS } from '../supabase/functions/aspire-probe/client.ts';
 
 const ID = 'client-id-xyz', SECRET = 'super-secret-value-123', TOKEN = 'eyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl';
 

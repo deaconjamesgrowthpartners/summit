@@ -95,6 +95,19 @@ What it reports:
    of rows with no won date and no lost date.
 4. Which fields identify the rep, the branch and the division, with examples.
 
+Pass 2 (the default since the first run showed Aspire holds sold work, not open pipeline) asks whether the
+weekly measures can come from Aspire. It pulls 500 opportunities and counts every SalesRepContactName, then tries
+SiteAudits, Activities, ContactActivities, Meetings, Events, the audit and activity type lookups, Tasks, Notes,
+PropertyContacts, Schedules and WorkTickets, each under its plural, singular and a few obvious variants. For each
+one that exists it reports:
+- the fields on a sample record
+- the date field and the date range of the 50 most recent records
+- the person fields, with counts of each name
+- counts of any type field (for example, how many activities are Client Visits)
+- whether a date filter and a person filter are really applied, not just accepted
+
+Send `{"pass": 1}` to run the first pass again.
+
 Run it:
 ```
 supabase functions deploy aspire-probe --project-ref tyrtzxnhwjchtemytfxv
