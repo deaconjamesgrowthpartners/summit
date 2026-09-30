@@ -106,7 +106,21 @@ one that exists it reports:
 - counts of any type field (for example, how many activities are Client Visits)
 - whether a date filter and a person filter are really applied, not just accepted
 
-Send `{"pass": 1}` to run the first pass again.
+Pass 3 (the default now) reconciles Aspire against Summit. Up to 300 calls, same spacing and 429 handling.
+- Ownership: every opportunity that is not Won or Lost, plus everything Won in the last 180 days, with
+  the 14 fields Summit needs, grouped by rep (counts, estimated and won dollars) and by status.
+- Activity: activities created in the last 90 days, per CreatedByUserName per Monday-start week, with how many
+  weeks each person has at least one (habit 75%+, patchy 50-74%, occasional under 50%). Also category
+  filled versus blank, and how many link to a property, an opportunity, both, or neither.
+
+Paging goes by key (`ID gt <last ID>`, ordered by ID), which works even where Aspire ignores `$skip`. If the key
+filter is refused or ignored it falls back to `$skip`, and stops rather than double counts if that is ignored too.
+Each pull is checked against Aspire's own `$count`, and every row is checked again here, so a filter Aspire
+accepts but ignores cannot inflate a number. The report's `paging` block says what happened.
+
+Send `{"part": "ownership"}` or `{"part": "activity"}` to run half, if the full run hits the time budget.
+`?format=csv` returns the opportunity rows as a spreadsheet. `ASPIRE_PROBE_SECONDS` raises the time budget
+(default 125, the free plan cuts off at 150). Send `{"pass": 1}` or `{"pass": 2}` to run an earlier pass.
 
 Run it:
 ```
