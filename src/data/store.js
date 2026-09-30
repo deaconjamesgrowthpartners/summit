@@ -17,6 +17,8 @@ export const S = {
   filters: {},
   sort: {},
   crm: null,          // pasted CRM export, id -> { status, value }
+  sync: null,         // Aspire sync: { runs, unmatched }. null when the workspace has none
+  syncing: false,
   live: 'connecting',
 };
 

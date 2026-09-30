@@ -26,7 +26,9 @@ export async function signOut() { user = null; authCb(null); }
 export async function workspaces() { return db.workspaces.map(({ id, slug, name }) => ({ id, slug, name })); }
 export async function workspace(slug) { return clone(db.workspaces.find((w) => w.slug === slug) || null); }
 export async function isAdmin() { return false; }
-export async function load() { return clone({ members: db.members, opps: db.opps, commits: db.commits, goals: db.goals, accounts: db.accounts }); }
+export async function load() { return clone({ members: db.members, opps: db.opps, commits: db.commits, goals: db.goals, accounts: db.accounts, sync: db.sync }); }
+export async function syncLog() { return clone(db.sync); }
+export async function runSync() { throw new Error('the demo does not reach Aspire'); }
 export function subscribe(_ws, onChange, onStatus) {
   listeners.push(onChange);
   setTimeout(() => onStatus && onStatus('SUBSCRIBED'), 10);

@@ -82,6 +82,7 @@ export function normalize(ws) {
     book,
     summitTiles,
     crmLabel: check.crm_label || 'CRM',
+    crmSource: ws.crm_source || null,
     branches: arr(ws.branches).map(String),
     lock_dow: +ws.lock_dow || 2,
     lock_time: ws.lock_time || '17:00',

@@ -27,6 +27,8 @@ Env (optional, the publishable key and URL are the defaults):
      It stops and changes nothing unless Elevation has exactly 1 leader and 4 reps.
    - `006_book_config.sql` (after 005, which made the `accounts` table): realtime on `accounts`, plus the
      book block on the Grow tab and the book tiles on the Summit tab.
+   - `007_aspire_sync.sql`: the Aspire sync tables, views, SQL functions and the nightly pg_cron job.
+     See "Aspire sync" below.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
@@ -73,6 +75,40 @@ Env (optional, the publishable key and URL are the defaults):
 - `tabs[summit].tiles[]`: `type` (book_value | book_at_risk), `label`. They follow the Viewing scope.
 - `goal_tiles[]`: `key`, `label`, `source` (won_recurring|manual), `goal`, `actual`, `as_of`,
   `deadline`, `coverage`. The values live in `goals.values` for the current year.
+
+## Aspire sync
+
+`supabase/functions/aspire-sync` makes Aspire the pipeline source for any workspace with
+`crm_source = 'aspire'` (Elevation, set by 007). It reads Aspire and writes Summit. Nothing else.
+- Every call to Aspire is a GET, except the login (`POST /Authorization`). The client throws on anything else.
+- It writes only `aspire_opps` (one row per OpportunityID, typed columns plus the raw record as jsonb) and
+  `aspire_sync_runs` (the log), through three SQL functions only the service role can call. `opps`, commits,
+  goals and the book are never touched.
+- First run pulls everything. After that, `ModifiedDate ge` one day before the newest ModifiedDate the last
+  good run saw. Pages by key: `OpportunityID gt <last>`, ordered by OpportunityID, `$top=1000`.
+- A row is only rewritten when its record changed. A complete full pull marks rows Aspire no longer returns
+  as removed. They leave the view, not the table.
+- A run that runs out of time keeps what it got, logs `partial`, and does not move the cutoff.
+
+The board reads `aspire_pipeline`, which joins `aspire_opps` to `members` on SalesRepContactName, ignoring
+case and extra spaces. It matches `full_name` or `members.crm_name`, for when Aspire spells a rep differently.
+A name that matches nobody stays in the view with `member_id` null and `unassigned = true`.
+`aspire_unmatched` lists those names with their deal counts. Data Check shows the last runs and those names.
+Admins get a **Run sync now** button there.
+
+Set up, once, after 007: `select vault.create_secret('<service role key>', 'aspire_sync_key');`. Use the
+same key the probe accepted. Deploy the function (paste `supabase/dashboard/aspire-sync.ts`, or
+`supabase functions deploy aspire-sync --project-ref tyrtzxnhwjchtemytfxv`).
+
+Run it:
+- nightly at 07:17 UTC by pg_cron (job `aspire-sync-nightly`)
+- by hand in SQL: `select aspire_sync_now();` or `select aspire_sync_now(true);` for a full re-pull
+- from Data Check, as an admin
+- the log: `select * from aspire_sync_runs order by id desc limit 5;`
+
+`npm test` checks the sync against a simulated Aspire. With a local Postgres,
+`SUMMIT_TEST_PG="host=... port=... user=..." npm test` also runs migration 007 end to end
+(`test/sql/aspire-sync.test.sql`).
 
 ## Aspire probe (discovery only)
 

@@ -66,7 +66,17 @@ export async function load(wsId, sinceWeek) {
     // the book is optional. a workspace without one still loads.
     all(() => sb.from('accounts').select('*').eq('workspace_id', wsId).order('property')).catch(() => []),
   ]);
-  return { members, opps, commits, goals, accounts };
+  return { members, opps, commits, goals, accounts, sync: await syncLog(wsId) };
+}
+// the Aspire sync log and the names Aspire has that the roster does not. null before migration 007.
+export async function syncLog(wsId) {
+  try {
+    const runs = must(await sb.from('aspire_sync_runs').select('*').eq('workspace_id', wsId).order('started_at', { ascending: false }).limit(6));
+    const unmatched = must(await sb.from('aspire_unmatched').select('*').eq('workspace_id', wsId).order('deals', { ascending: false }));
+    return { runs, unmatched };
+  } catch {
+    return null;
+  }
 }
 
 /* ---------- live ---------- */
@@ -81,6 +91,16 @@ export function subscribe(wsId, onChange, onStatus) {
 }
 
 /* ---------- writes ---------- */
+// admins only: the function's gate refuses everyone else. it reads Aspire and writes aspire_opps.
+export async function runSync(full = false) {
+  const { data, error } = await sb.functions.invoke('aspire-sync', { body: { full } });
+  if (error) {
+    let msg = error.message;
+    try { const b = await error.context?.json?.(); msg = b?.error || b?.run?.errors?.[0] || msg; } catch { /* keep the message */ }
+    throw new Error(msg);
+  }
+  return data;
+}
 export async function insertOpp(row) {
   return must(await sb.from('opps').insert(row).select().single());
 }

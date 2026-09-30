@@ -81,7 +81,7 @@ async function boot() {
 function teardown() {
   if (unsub) unsub();
   unsub = null;
-  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, commits: {}, accounts: {}, goalsRow: null, filters: {}, sort: {}, crm: null });
+  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, commits: {}, accounts: {}, goalsRow: null, filters: {}, sort: {}, crm: null, sync: null, syncing: false });
   applyBrand({});
 }
 
@@ -126,6 +126,7 @@ async function openWorkspace(slug) {
   S.commits = Object.fromEntries(data.commits.map((c) => [ckey(c.member_id, c.week_key), c]));
   S.accounts = Object.fromEntries((data.accounts || []).map((a) => [a.id, a]));
   S.goalsRow = pickGoals(data.goals, w.year);
+  S.sync = data.sync || null;
   S.scope = 'company';
   try { const sc = localStorage.getItem(`summit.scope.${S.cfg.id}`); if (sc) S.scope = sc; } catch { /* private mode */ }
   const want = tabFromUrl();
@@ -140,6 +141,21 @@ async function openWorkspace(slug) {
   });
 }
 
+// admins only. the function reads Aspire, writes aspire_opps, and logs the run
+async function syncNow(full) {
+  S.syncing = true; renderAll();
+  try {
+    const r = await api.runSync(full);
+    const run = r?.run || {};
+    toast(r?.status === 'ok' ? `Synced. ${run.rows_pulled ?? 0} pulled, ${(run.rows_inserted ?? 0) + (run.rows_updated ?? 0)} changed` : `Sync ${r?.status || 'finished'}. See the log`);
+  } catch (e) {
+    toast(`Sync did not run: ${e.message || e}`);
+  }
+  S.syncing = false;
+  S.sync = (await api.syncLog(S.cfg.id).catch(() => null)) || S.sync;
+  renderAll();
+}
+
 async function refresh() {
   if (!S.cfg) return;
   try {
@@ -149,6 +165,7 @@ async function refresh() {
     S.commits = Object.fromEntries(data.commits.map((c) => [ckey(c.member_id, c.week_key), c]));
     S.accounts = Object.fromEntries((data.accounts || []).map((a) => [a.id, a]));
     S.goalsRow = pickGoals(data.goals, wk().year) || S.goalsRow;
+    S.sync = data.sync || S.sync;
     renderSoon();
   } catch { /* try again next time */ }
 }
@@ -312,6 +329,8 @@ document.addEventListener('click', async (e) => {
     return renderAll();
   }
   if (t.closest('[data-crm-clear]')) { S.crm = null; return renderAll(); }
+  const rs = t.closest('[data-sync]');
+  if (rs && S.admin && !S.syncing) return syncNow(rs.dataset.sync === 'full');
   const th = t.closest('th[data-sort]');
   if (th && S.view === 'accounts') {
     const k = th.dataset.sort;

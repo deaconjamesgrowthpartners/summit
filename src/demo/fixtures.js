@@ -121,5 +121,20 @@ export function fixtures(now = new Date()) {
       satisfaction: pick(['Green', 'Green', 'Green', 'Yellow', 'Red']), notes: null,
     };
   });
-  return { workspaces: [WS], members, opps, commits, goals, accounts };
+  // the Aspire sync log, as migration 007 writes it
+  const at = (h) => new Date(now.getTime() - h * 3600000).toISOString();
+  const sync = {
+    runs: [
+      { id: 3, started_at: at(9), finished_at: at(8.98), trigger: 'cron', mode: 'incremental', status: 'ok', rows_pulled: 38, rows_inserted: 2, rows_updated: 11, rows_unchanged: 25, rows_removed: 0, calls: 2, errors: [], notes: [] },
+      { id: 2, started_at: at(33), finished_at: at(32.98), trigger: 'cron', mode: 'incremental', status: 'partial', rows_pulled: 1000, rows_inserted: 0, rows_updated: 4, rows_unchanged: 996, rows_removed: 0, calls: 2, errors: [], notes: ['stopped at page 2 to stay inside the time budget. The next run picks up the rest'] },
+      { id: 1, started_at: at(40), finished_at: at(39.9), trigger: 'manual', mode: 'full', status: 'ok', rows_pulled: 2410, rows_inserted: 2410, rows_updated: 0, rows_unchanged: 0, rows_removed: 0, calls: 4, errors: [], notes: [] },
+    ],
+    unmatched: [
+      { sales_rep_name: 'Matthew Royer', deals: 41, open_deals: 12, open_estimated: 184000, won_deals: 29 },
+      { sales_rep_name: 'Jamy August', deals: 17, open_deals: 6, open_estimated: 52500, won_deals: 11 },
+      { sales_rep_name: 'Genaro Martinez', deals: 9, open_deals: 2, open_estimated: 18800, won_deals: 7 },
+      { sales_rep_name: 'Fermin Hernandez Aldaco', deals: 4, open_deals: 1, open_estimated: 6200, won_deals: 3 },
+    ],
+  };
+  return { workspaces: [WS], members, opps, commits, goals, accounts, sync };
 }

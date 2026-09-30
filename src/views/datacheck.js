@@ -32,6 +32,7 @@ export function renderCheck(el) {
     <div>
       <div class="card mb"><h2 class="s15" style="margin-bottom:8px">Commits not in · week ending ${fmtDate(w.key)}</h2>
         ${missing.length ? missing.map((r) => `<div class="kv"><span class="person">${esc(r.full_name)}</span><span class="pill n">${w.locked ? 'not in' : `due ${esc(lock)}`}</span></div>`).join('') : '<div class="kv"><span>Everyone is in.</span><span class="pill g">all in</span></div>'}</div>
+      ${syncCard(cfg)}
       <div class="card mb"><h2 class="s15" style="margin-bottom:6px">${esc(cfg.crmLabel)} cross-check</h2>
         <p class="help">Paste the ${esc(cfg.crmLabel)} export (tab or comma separated: id, status, estimated $). Rows with a matching ${esc(cfg.crmLabel)} # get compared. Nothing is saved or sent. It stays in this browser tab.</p>
         <textarea class="paste" id="crmPaste" placeholder="Id&#9;Status&#9;Est $&#10;4471&#9;Proposed&#9;14200" aria-label="${esc(cfg.crmLabel)} export"></textarea>
@@ -46,5 +47,30 @@ export function renderCheck(el) {
         <p class="note">Period ${esc(S.goalsRow?.period || String(w.year))}.</p>
       </div>` : ''}
     </div>
+  </div>`;
+}
+
+// The Aspire sync: the last run, the ones before it, and the Aspire names nobody on the roster matches.
+// Color goes on the status and the counts, never on a name.
+const RUN_PILL = { ok: ['g', 'synced'], partial: ['y', 'partial'], error: ['r', 'failed'], running: ['n', 'running'] };
+function syncCard(cfg) {
+  const sy = S.sync;
+  if (cfg.crmSource !== 'aspire' && !sy?.runs?.length) return '';
+  const when = (t) => (t ? new Date(t).toLocaleString('en-US', { timeZone: cfg.lock_tz, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+  const pill = (st) => { const [c, l] = RUN_PILL[st] || ['n', st]; return `<span class="pill ${c}">${esc(l)}</span>`; };
+  const changed = (r) => (r.rows_inserted || 0) + (r.rows_updated || 0);
+  const runs = sy?.runs || [];
+  const last = runs[0];
+  const um = sy?.unmatched || [];
+  const btn = S.admin ? `<div class="row-actions"><button class="btn sm" data-sync ${S.syncing ? 'disabled' : ''}>${S.syncing ? 'Syncing...' : 'Run sync now'}</button><button class="lnk" data-sync="full" ${S.syncing ? 'disabled' : ''}>full re-pull</button></div>` : '';
+  return `<div class="card mb"><div class="sec-h"><h2 class="s15">${esc(cfg.crmLabel)} sync</h2>${last ? pill(last.status) : '<span class="pill n">not run yet</span>'}</div>
+    ${last ? `<p class="help">Last run ${esc(when(last.started_at))} · ${esc(last.mode)} · ${esc(last.trigger)}. ${last.rows_pulled} pulled, ${changed(last)} changed${last.rows_removed ? `, ${last.rows_removed} gone from ${esc(cfg.crmLabel)}` : ''}.</p>` : `<p class="help">Runs nightly. Nothing has synced yet.</p>`}
+    ${last?.errors?.length ? last.errors.map((e) => `<div class="issue"><span class="dot r"></span><div class="what"><small>${esc(e)}</small></div></div>`).join('') : ''}
+    ${last?.notes?.filter((n) => !/^(full pull|incremental:)/.test(n)).map((n) => `<p class="note">${esc(n)}</p>`).join('') || ''}
+    ${um.length ? `<h3 style="font-size:13px;margin:12px 0 4px">Not on the roster <span class="pill y">${um.length}</span></h3>
+      <p class="help">These ${esc(cfg.crmLabel)} reps match nobody in Summit. Their deals still show, as unassigned. Add them to the roster, or put their ${esc(cfg.crmLabel)} spelling in crm_name.</p>
+      ${um.map((u) => `<div class="kv"><span>${esc(u.sales_rep_name)}</span><span><span class="pill y">${u.open_deals} open</span> <small>${money(u.open_estimated)} · ${u.deals} deals</small></span></div>`).join('')}` : last ? '<div class="kv"><span>Every rep matches the roster.</span><span class="pill g">all matched</span></div>' : ''}
+    ${runs.length > 1 ? `<h3 style="font-size:13px;margin:12px 0 4px">Earlier runs</h3>${runs.slice(1).map((r) => `<div class="kv"><span><small>${esc(when(r.started_at))} · ${esc(r.mode)}</small></span><span><small>${r.rows_pulled} pulled · ${changed(r)} changed</small> ${pill(r.status)}</span></div>`).join('')}` : ''}
+    ${btn}
   </div>`;
 }
