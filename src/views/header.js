@@ -1,4 +1,4 @@
-import { S, wk, isLeader, reps, scope, oppsScoped, repsScoped, commitFor } from '../data/store.js';
+import { S, wk, isLeader, reps, scope, oppsScoped, repsScoped, commitFor, branchList } from '../data/store.js';
 import { esc, fmtDate } from '../lib/format.js';
 import { lockLabel } from '../lib/time.js';
 import { rowIssues } from '../lib/rules.js';
@@ -24,7 +24,7 @@ export function renderHeader(el, workspaces = []) {
   let scopeSel = '';
   if (isLeader()) {
     const sc = scope();
-    const opts = [['company', 'All'], ...cfg.branches.map((b) => [`branch:${b}`, `${b} branch`]), ...reps().map((r) => [`member:${r.id}`, r.full_name])];
+    const opts = [['company', 'All'], ...branchList().map((b) => [`branch:${b}`, `${b} branch`]), ...reps().map((r) => [`member:${r.id}`, r.full_name])];
     scopeSel = `<label>Viewing <select data-scope>${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === sc ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
   }
   const wsSel = S.admin && workspaces.length > 1

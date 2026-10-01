@@ -1,5 +1,5 @@
 // Grow and Net New. Same screen, one team each, words from the tab config.
-import { S, wk, goals, isLeader, repsScoped, commitFor, oppsAll } from '../data/store.js';
+import { S, wk, goals, isLeader, repsScoped, commitFor, oppsAll, fromCrm } from '../data/store.js';
 import { esc, money } from '../lib/format.js';
 import { mLabel } from '../data/workspace.js';
 import { lockLabel, isLockedWeek } from '../lib/time.js';
@@ -27,7 +27,12 @@ export function renderTeam(el, tab) {
   // accounts list
   const f = S.filters, fk = (k) => f[`${team}_${k}`] || '';
   let rows = opps.filter((o) => o.owner_member_id === r.id);
-  if (!fk('all')) rows = rows.filter((o) => o.priority || (isOpen(cfg, o) && stageOf(cfg, o).needs_close) || (isWon(cfg, o) && !o.installed));
+  const crm = fromCrm();
+  // focus list. Typed: starred, past the early stages, or waiting to install.
+  // From the CRM: everything open, plus won work that has not started yet or has no start date.
+  if (!fk('all')) rows = rows.filter((o) => crm
+    ? isOpen(cfg, o) || (isWon(cfg, o) && (!o.start_date || o.start_date >= w.today))
+    : o.priority || (isOpen(cfg, o) && stageOf(cfg, o).needs_close) || (isWon(cfg, o) && !o.installed));
   if (fk('stage')) rows = rows.filter((o) => o.stage === fk('stage'));
   if (fk('flag')) rows = rows.filter((o) => flag(cfg, o, w.today, S.crm) === fk('flag'));
   if (fk('size')) rows = rows.filter((o) => (+o.value || 0) >= +fk('size'));
@@ -98,12 +103,14 @@ export function renderTeam(el, tab) {
       <div class="bar tight">
         <select class="ed" data-f="${team}_sort"><option value="start" ${sortK === 'start' ? 'selected' : ''}>Sort: start date</option><option value="value" ${sortK === 'value' ? 'selected' : ''}>Sort: deal size</option><option value="flag" ${sortK === 'flag' ? 'selected' : ''}>Sort: flag</option></select>
         <select class="ed" data-f="${team}_size"><option value="">Deal size: all</option>${[5000, 25000, 100000].map((v) => `<option value="${v}" ${fk('size') === String(v) ? 'selected' : ''}>${money(v)}+</option>`).join('')}</select>
-        <select class="ed" data-f="${team}_stage"><option value="">Stage: all</option>${cfg.stages.map((s) => `<option ${fk('stage') === s.name ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+        <select class="ed" data-f="${team}_stage"><option value="">${crm ? 'Status' : 'Stage'}: all</option>${cfg.stages.map((s) => `<option ${fk('stage') === s.name ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
         <select class="ed" data-f="${team}_flag"><option value="">Flag: all</option><option value="r" ${fk('flag') === 'r' ? 'selected' : ''}>Red</option><option value="y" ${fk('flag') === 'y' ? 'selected' : ''}>Yellow</option><option value="g" ${fk('flag') === 'g' ? 'selected' : ''}>Green</option></select>
         <select class="ed" data-f="${team}_all"><option value="">Focus list</option><option value="1" ${fk('all') ? 'selected' : ''}>Everything of mine</option></select>
-        ${canEdit ? `<button class="btn sm" data-add="${esc(r.id)}" data-team="${esc(team)}">+ Add account</button>` : ''}
+        ${canEdit && !crm ? `<button class="btn sm" data-add="${esc(r.id)}" data-team="${esc(team)}">+ Add account</button>` : ''}
       </div></div>
     ${renderGrid(rows, { canEdit: canEditOpp })}
-    <p class="note">Focus list = your priority accounts plus anything past the early stages or waiting to install. Star a row to pin it. Red: next step past due, no touch in 14 days, bid out with no start date. Yellow: due in 3 days or a field missing.</p>
+    ${crm
+      ? `<p class="note">From ${esc(cfg.crmLabel)}, synced nightly. Change a deal in ${esc(cfg.crmLabel)} and it updates here the next morning. Focus list = everything open plus won work that has not started. Red: expected close passed, or a bid out with no start date. Yellow: a date or value missing.</p>`
+      : '<p class="note">Focus list = your priority accounts plus anything past the early stages or waiting to install. Star a row to pin it. Red: next step past due, no touch in 14 days, bid out with no start date. Yellow: due in 3 days or a field missing.</p>'}
   </div>`;
 }

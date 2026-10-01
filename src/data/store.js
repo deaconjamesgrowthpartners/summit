@@ -51,6 +51,15 @@ function scopeMatch(branch, memberId) {
   return memberId === sc.slice(7);
 }
 export const oppsAll = () => Object.values(S.opps);
+export const fromCrm = () => S.cfg.pipelineSource === 'aspire';
+// the configured branches, plus any branch an Aspire deal carries that the config does not list
+export function branchList() {
+  const out = [...S.cfg.branches];
+  if (fromCrm()) for (const o of oppsAll()) if (o.branch && !out.includes(o.branch)) out.push(o.branch);
+  return out;
+}
+// who a deal belongs to, for display: the roster name, or the CRM's name when it matches nobody
+export const repOf = (o) => nameOf(o.owner_member_id) || o.rep_name || '';
 export const oppsScoped = () => oppsAll().filter((o) => scopeMatch(o.branch, o.owner_member_id));
 export const repsScoped = () => reps().filter((r) => scopeMatch(r.branch, r.id));
 // the book has no branch column. an account sits in its owner's branch.

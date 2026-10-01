@@ -1,8 +1,9 @@
-import { S, wk, goals, isCompany, scopeLabel, oppsScoped, repsScoped, commitFor, nameOf, tabFor, accountsScoped } from '../data/store.js';
+import { S, wk, goals, isCompany, scopeLabel, oppsScoped, repsScoped, commitFor, tabFor, accountsScoped, branchList, fromCrm } from '../data/store.js';
+import { repCell } from './grid.js';
 import { bookTile } from './book.js';
 import { esc, money, pct, fmtDate, addDays, dow, daysBetween, validDate } from '../lib/format.js';
 import { mLabel } from '../data/workspace.js';
-import { isOpen, isWon, isLost, isRecurring, weighted, bidOut, sum, ryg, autoDid, didValue, comValue, flag, rowIssues } from '../lib/rules.js';
+import { isOpen, isWon, isLost, isUnknown, isRecurring, weighted, bidOut, sum, ryg, autoDid, didValue, comValue, flag, rowIssues } from '../lib/rules.js';
 
 const tile = (cls, l, v, s, extra = '') =>
   `<div class="tile ${cls}"><span class="stripe"></span><div class="l">${l}</div><div class="v">${v}</div>${extra}${s ? `<div class="s">${s}</div>` : ''}</div>`;
@@ -15,10 +16,15 @@ function tileActual(cfg, t, won, g) {
 export function renderSummit(el) {
   const cfg = S.cfg, w = wk(), g = goals(), company = isCompany();
   const rows = oppsScoped();
-  const yr = String(w.year);
-  const won = rows.filter((o) => isWon(cfg, o) && (!o.actual_close || o.actual_close.startsWith(yr)));
+  const yr = String(w.year), crm = fromCrm();
+  // signed this year. A CRM deal needs a won date in the year; years of history are not "signed this year".
+  const inYear = (d) => !!d && d.startsWith(yr);
+  const won = rows.filter((o) => isWon(cfg, o) && (crm ? inYear(o.actual_close) : !o.actual_close || inYear(o.actual_close)));
+  // open is only what the config calls open. Won, Delivered, Lost and unknown statuses never count.
   const open = rows.filter((o) => isOpen(cfg, o));
-  const lost = rows.filter((o) => isLost(cfg, o));
+  const lost = rows.filter((o) => isLost(cfg, o) && (!crm || inYear(o.lost_date)));
+  const unknown = rows.filter((o) => isUnknown(cfg, o));
+  const unassignedOpen = open.filter((o) => o.unassigned);
   const recurring = won.filter((o) => isRecurring(cfg, o));
   const winRate = won.length + lost.length ? Math.round((won.length / (won.length + lost.length)) * 100) : 0;
   const bids = open.filter((o) => bidOut(cfg, o));
@@ -86,7 +92,8 @@ export function renderSummit(el) {
 
   // by branch
   const wonM = cfg.measures.find((m) => m.auto === 'won_value');
-  const br = cfg.branches
+  const brNames = [...branchList(), ...(rows.some((o) => !o.branch) ? [''] : [])];
+  const br = brNames
     .filter((b) => company || rows.some((o) => o.branch === b) || RS.some((r) => r.branch === b))
     .map((b) => {
       const R = rows.filter((o) => o.branch === b);
@@ -103,14 +110,14 @@ export function renderSummit(el) {
   const top = [...open].sort((a, b) => (+b.value || 0) - (+a.value || 0)).slice(0, 10);
 
   el.innerHTML = `
-  <div class="sec-h"><h2>Where ${esc(scopeLabel())} stands</h2><span class="sub">${company ? 'Every team together. Updates the moment anyone changes a field.' : `Only ${esc(scopeLabel())}'s deals and commits. Pick All in Viewing for the whole picture.`}</span></div>
+  <div class="sec-h"><h2>Where ${esc(scopeLabel())} stands</h2><span class="sub">${company ? (crm ? `Every team together. Deals come from ${esc(cfg.crmLabel)}, synced nightly. Commits update live.` : 'Every team together. Updates the moment anyone changes a field.') : `Only ${esc(scopeLabel())}'s deals and commits. Pick All in Viewing for the whole picture.`}</span></div>
   <div class="tiles">
     ${tile('big', `Signed ${yr}`, money(sum(won)), `${won.length} contracts · ${money(sum(recurring))} recurring · ${money(sum(won) - sum(recurring))} one-time`)}
     ${goalHtml}
     ${cfg.summitTiles.map((t) => bookTile(t, accountsScoped(), w.today)).join('')}
     ${tile('', 'Open pipeline', money(sum(open)), `${open.length} opportunities · ${money(sum(open, (o) => weighted(cfg, o)))} weighted`)}
     ${covHtml}
-    ${tile('', 'Win rate', `${winRate}%`, `${won.length} won · ${lost.length} lost`)}
+    ${tile('', 'Win rate', `${winRate}%`, `${won.length} won · ${lost.length} lost${crm ? ` in ${yr}` : ''}`)}
   </div>
 
   <div class="split sec">
@@ -124,11 +131,13 @@ export function renderSummit(el) {
     <div class="card">
       <div class="sec-h"><h2 class="s16">By branch</h2><span class="sub">Friendly competition</span></div>
       <div class="tw flat"><table><thead><tr><th>Branch</th><th class="num">Signed</th><th class="num">Open</th><th class="num">Weighted</th>${wonM ? `<th class="num">${esc(w.scoreLabel)} ${esc(mLabel(wonM))}</th>` : ''}<th>Commits in</th></tr></thead><tbody>
-      ${br.map((x) => `<tr><td><b>${esc(x.b)}</b></td><td class="num">${money(x.signed)}</td><td class="num">${money(x.open)}<small class="m"> ·${x.n}</small></td><td class="num">${money(x.weighted)}</td>${wonM ? `<td class="num"><span class="dot ${ryg(x.wk.d, x.wk.c)}"></span> ${money(x.wk.d)}<small class="m">/${money(x.wk.c)}</small></td>` : ''}<td>${x.inB} of ${x.rr}</td></tr>`).join('')}
+      ${br.map((x) => `<tr><td><b>${x.b ? esc(x.b) : 'No branch'}</b></td><td class="num">${money(x.signed)}</td><td class="num">${money(x.open)}<small class="m"> ·${x.n}</small></td><td class="num">${money(x.weighted)}</td>${wonM ? `<td class="num"><span class="dot ${ryg(x.wk.d, x.wk.c)}"></span> ${money(x.wk.d)}<small class="m">/${money(x.wk.c)}</small></td>` : ''}<td>${x.inB} of ${x.rr}</td></tr>`).join('')}
       </tbody></table></div>
       ${company && gt.length ? `<div class="kv top"><span>Total commitment (${gt.map((x) => esc(x.t.label.toLowerCase())).join(' + ')})</span><b>${money(totalAct)} / ${money(totalGoal)}</b></div>` : ''}
       <div class="kv"><span>Commits in this week</span><b>${inCount} of ${RS.length}</b></div>
       <div class="kv"><span>Open deals missing a date</span><b>${missingDate}</b></div>
+      ${crm && unassignedOpen.length ? `<div class="kv"><span>Open deals whose ${esc(cfg.crmLabel)} rep is not on the roster</span><b>${unassignedOpen.length} · ${money(sum(unassignedOpen))}</b></div>` : ''}
+      ${crm && unknown.length ? `<div class="kv"><span>Deals with a status not mapped (not counted above)</span><b>${unknown.length}</b></div>` : ''}
     </div>
   </div>
 
@@ -139,8 +148,8 @@ export function renderSummit(el) {
 
   <div class="sec card">
     <div class="sec-h"><h2 class="s16">Top open deals</h2><span class="sub">By value · ${esc(scopeLabel())}</span></div>
-    ${top.length ? `<div class="tw flat"><table><thead><tr><th></th><th>Account</th><th>Rep</th><th>Type</th><th class="num">Est $</th><th>Stage</th><th>Close</th><th>Start</th><th>Next step</th></tr></thead><tbody>
-    ${top.map((o) => `<tr><td><span class="dot ${flag(cfg, o, w.today, S.crm)}"></span></td><td class="acct">${esc(o.account)}<small>${esc([o.branch, o.segment].filter(Boolean).join(' · '))}</small></td><td><span class="person">${esc(nameOf(o.owner_member_id))}</span></td><td>${esc(o.category)}</td><td class="num">${money(o.value)}</td><td>${esc(o.stage)}</td><td>${o.close_date ? fmtDate(o.close_date) : '<span class="pill r">missing</span>'}</td><td>${o.start_date ? fmtDate(o.start_date) : '<span class="pill r">missing</span>'}</td><td class="wrap">${esc(o.next_step)}</td></tr>`).join('')}
+    ${top.length ? `<div class="tw flat"><table><thead><tr><th></th><th>Account</th><th>Rep</th><th>Type</th><th class="num">Est $</th><th>${crm ? 'Status' : 'Stage'}</th><th>Close</th><th>Start</th><th>${crm ? `${esc(cfg.crmLabel)} #` : 'Next step'}</th></tr></thead><tbody>
+    ${top.map((o) => `<tr><td><span class="dot ${flag(cfg, o, w.today, S.crm)}"></span></td><td class="acct">${esc(o.account)}<small>${esc([o.job, o.branch, o.segment].filter(Boolean).join(' · '))}</small></td><td>${repCell(o)}</td><td>${esc(o.category)}</td><td class="num">${money(o.value)}</td><td>${esc(o.stage)}</td><td>${o.close_date ? fmtDate(o.close_date) : '<span class="pill r">missing</span>'}</td><td>${o.start_date ? fmtDate(o.start_date) : '<span class="pill r">missing</span>'}</td><td class="wrap">${esc(crm ? o.crm_ref : o.next_step)}</td></tr>`).join('')}
     </tbody></table></div>` : '<div class="empty">No open deals yet.</div>'}
   </div>
   ${company && note ? `<p class="note">${esc(note)}</p>` : ''}`;

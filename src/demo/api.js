@@ -1,6 +1,6 @@
 // Demo adapter. Same surface as data/api.js, all in memory, nothing leaves the browser.
 // Only bundled when VITE_DEMO=1. Production builds never include it.
-import { fixtures } from './fixtures.js';
+import { fixtures, ASPIRE_PIPELINE } from './fixtures.js';
 import { clock } from '../lib/time.js';
 
 // ?now=2026-09-29T22:30:00Z pins the demo clock, to check lock night
@@ -9,6 +9,8 @@ if (pinned && !isNaN(Date.parse(pinned))) { const t0 = Date.parse(pinned), s0 = 
 
 export const demo = true;
 const db = fixtures(clock.now());
+// ?pipeline=aspire runs the demo the way Elevation runs after migration 008: deals from Aspire
+if (new URLSearchParams(location.search).get('pipeline') === 'aspire') db.workspaces.forEach((w) => Object.assign(w, { pipeline: ASPIRE_PIPELINE, crm_source: 'aspire' }));
 const listeners = [];
 const as = new URLSearchParams(location.search).get('as') || 'leader';
 const me = db.members.find((m) => m.email.includes(`+${as}@`)) || db.members[0];
@@ -26,7 +28,11 @@ export async function signOut() { user = null; authCb(null); }
 export async function workspaces() { return db.workspaces.map(({ id, slug, name }) => ({ id, slug, name })); }
 export async function workspace(slug) { return clone(db.workspaces.find((w) => w.slug === slug) || null); }
 export async function isAdmin() { return false; }
-export async function load() { return clone({ members: db.members, opps: db.opps, commits: db.commits, goals: db.goals, accounts: db.accounts, sync: db.sync }); }
+export async function load(_ws, _since, source = 'summit') {
+  return clone(source === 'aspire'
+    ? { members: db.members, opps: [], pipeline: db.pipeline, commits: db.commits, goals: db.goals, accounts: db.accounts, sync: db.sync }
+    : { members: db.members, opps: db.opps, commits: db.commits, goals: db.goals, accounts: db.accounts, sync: db.sync });
+}
 export async function syncLog() { return clone(db.sync); }
 export async function runSync() { throw new Error('the demo does not reach Aspire'); }
 export function subscribe(_ws, onChange, onStatus) {

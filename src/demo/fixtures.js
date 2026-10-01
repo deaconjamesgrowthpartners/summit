@@ -53,6 +53,21 @@ const WS = {
   ],
 };
 
+// migration 008's config, used when the demo runs with ?pipeline=aspire
+export const ASPIRE_PIPELINE = {
+  source: 'aspire',
+  statuses: [
+    { name: 'New', status: 'open', prob: 0.1 },
+    { name: 'Bidding', status: 'open', prob: 0.4, needs_close: true },
+    { name: 'Pending Approval', status: 'open', prob: 0.6, needs_close: true, bid: true },
+    { name: 'Approved', status: 'open', prob: 0.8, needs_close: true, bid: true },
+    { name: 'Won', status: 'won', prob: 1 },
+    { name: 'Delivered', status: 'won', prob: 1 },
+    { name: 'Lost', status: 'lost', prob: 0 },
+  ],
+  divisions: {},
+};
+
 // the 5 test rows, same addresses and teams as migration 003
 const MEMBERS = [
   ['Test Leader', 'leader', null, 'Oakwood', 'leader'],
@@ -136,5 +151,33 @@ export function fixtures(now = new Date()) {
       { sales_rep_name: 'Fermin Hernandez Aldaco', deals: 4, open_deals: 1, open_estimated: 6200, won_deals: 3 },
     ],
   };
-  return { workspaces: [WS], members, opps, commits, goals, accounts, sync };
+  // aspire_pipeline rows, the way the view returns them. Status mix close to Elevation's real one,
+  // plus reps who are not on the roster, a blank status, a blank branch and a division with no category.
+  const statusMix = [['Won', 30], ['Delivered', 8], ['Lost', 4], ['Bidding', 10], ['Approved', 5], ['', 2], ['New', 3], ['Pending Approval', 2]];
+  const statusBag = statusMix.flatMap(([s, n]) => Array(n).fill(s));
+  const aspireReps = [...reps.map((m) => m.full_name), 'Matthew Royer', 'Jamy August'];
+  const pipeline = Array.from({ length: 128 }, (_, i) => {
+    const status = statusBag[i % statusBag.length];
+    const repName = aspireReps[(i * 7) % aspireReps.length];
+    const m = members.find((x) => x.full_name === repName);
+    const wonish = status === 'Won' || status === 'Delivered';
+    const division = pick(['Maintenance', 'Maintenance', 'Enhancements', 'Enhancements', 'Construction']);
+    const est = Math.round((division === 'Maintenance' ? 15000 + r() * 80000 : 3000 + r() * 45000) / 100) * 100;
+    const wonDate = wonish ? addDays(d, -Math.round(r() * 420)) : null;
+    return {
+      workspace_id: WS.id, opportunity_id: 20000 + i, opportunity_number: 7000 + i,
+      opportunity_name: `${division === 'Maintenance' ? 'Annual maintenance' : pick(['Spring color', 'Irrigation repair', 'Hardscape', 'Tree work', 'Mulch'])} ${2026 - (i % 3)}`,
+      property_name: names[i % names.length] + (i >= names.length ? ` ${Math.floor(i / names.length) + 1}` : ''),
+      sales_rep_name: repName, member_id: m ? m.id : null, member_name: m ? m.full_name : null, member_role: m?.role || null,
+      member_team: m?.team || null, member_active: m ? true : null, unassigned: !m,
+      branch_name: i % 41 === 5 ? null : m?.branch || pick(WS.branches), division_name: division, status_name: status || null,
+      status: wonish ? 'won' : status === 'Lost' ? 'lost' : status ? 'open' : 'unknown',
+      estimated_dollars: est, won_dollars: wonish ? Math.round(est * (0.85 + r() * 0.2)) : null,
+      start_date: wonish || r() > 0.4 ? addDays(d, Math.round(-30 + r() * 90)) : null,
+      anticipated_close_date: !wonish && status !== 'Lost' && r() > 0.25 ? addDays(d, Math.round(-10 + r() * 60)) : null,
+      won_date: wonDate, lost_date: status === 'Lost' ? addDays(d, -Math.round(r() * 200)) : null,
+      aspire_modified_at: addDays(d, -Math.round(r() * 30)) + 'T10:00:00', synced_at: now.toISOString(),
+    };
+  });
+  return { workspaces: [WS], members, opps, commits, goals, accounts, sync, pipeline };
 }

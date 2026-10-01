@@ -1,10 +1,11 @@
 // The shared inline-edit grid. Every edit saves and updates every screen.
-import { S, wk, memberById } from '../data/store.js';
+import { S, wk, memberById, repOf } from '../data/store.js';
 import { esc, money, validDate } from '../lib/format.js';
 import { isWon, prob, weighted, rowIssues, flag } from '../lib/rules.js';
 
 export function renderGrid(rows, { canEdit = () => false, full = false } = {}) {
   if (!rows.length) return '<div class="card empty">Nothing here yet.</div>';
+  if (S.cfg.pipelineSource === 'aspire') return crmGrid(rows, full);
   const cfg = S.cfg, w = wk();
   const cols = full
     ? ['flag', 'pri', 'account', 'contact', 'branch', 'owner', 'category', 'segment', 'value', 'stage', 'prob', 'weighted', 'close_date', 'start_date', 'bid_date', 'next_step', 'next_step_date', 'last_activity', 'crm_ref', 'notes']
@@ -51,8 +52,49 @@ export function renderGrid(rows, { canEdit = () => false, full = false } = {}) {
   </tbody></table></div>`;
 }
 
+// Aspire deals: read only. Fix a deal in Aspire and the nightly sync brings it here.
+// A rep Aspire names who is not on the roster shows with a plain "not on roster" tag. Never red.
+export function repCell(o) {
+  const n = repOf(o);
+  if (!o.unassigned) return `<span class="person">${esc(n)}</span>`;
+  return `${n ? `<span class="person">${esc(n)}</span> ` : ''}<span class="pill n">${n ? 'not on roster' : 'no rep'}</span>`;
+}
+function crmGrid(rows, full) {
+  const cfg = S.cfg, w = wk();
+  const cols = full
+    ? ['flag', 'account', 'branch', 'owner', 'category', 'value', 'stage', 'prob', 'weighted', 'close_date', 'start_date', 'actual_close', 'crm_ref']
+    : ['flag', 'account', 'category', 'value', 'stage', 'close_date', 'start_date', 'actual_close', 'crm_ref'];
+  const head = {
+    flag: '', account: 'Property', branch: 'Branch', owner: 'Rep', category: 'Type', value: '$', stage: 'Status', prob: 'Prob', weighted: 'Weighted',
+    close_date: 'Exp. close', start_date: 'Start', actual_close: 'Won', crm_ref: `${cfg.crmLabel} #`,
+  };
+  const numCols = ['value', 'prob', 'weighted'];
+  const date = (o, c, iss) => (validDate(o[c]) ? fmtDay(o[c]) : iss.some((i) => i.f === c) ? '<span class="pill r">missing</span>' : '');
+  const cell = (o, c, iss) => {
+    switch (c) {
+      case 'flag': return `<td><span class="dot ${flag(cfg, o, w.today, S.crm)}" title="${esc(iss.map((i) => i.t).join(' · '))}"></span></td>`;
+      case 'account': return `<td class="acct">${esc(o.account)}<small>${esc([o.job, full ? '' : o.branch].filter(Boolean).join(' · '))}</small></td>`;
+      case 'branch': return `<td>${esc(o.branch)}</td>`;
+      case 'owner': return `<td>${repCell(o)}</td>`;
+      case 'category': return `<td>${esc(o.category)}</td>`;
+      case 'value': return `<td class="num">${+o.value ? money(o.value) : iss.some((i) => i.f === 'value') ? '<span class="pill y">none</span>' : ''}</td>`;
+      case 'stage': return `<td>${o.status_known ? esc(o.stage) : `<span class="pill y">${esc(o.status_name || 'blank')}</span>`}</td>`;
+      case 'prob': return `<td class="num">${Math.round(prob(cfg, o) * 100)}%</td>`;
+      case 'weighted': return `<td class="num">${money(weighted(cfg, o))}</td>`;
+      case 'close_date': case 'start_date': case 'actual_close': return `<td>${date(o, c, iss)}</td>`;
+      case 'crm_ref': return `<td>${esc(o.crm_ref)}</td>`;
+    }
+    return '<td></td>';
+  };
+  return `<div class="tw"><table><thead><tr>${cols.map((c) => `<th class="${numCols.includes(c) ? 'num' : ''}" ${full && c !== 'flag' ? `data-sort="${c}"` : ''}>${esc(head[c])}</th>`).join('')}</tr></thead><tbody>
+  ${rows.map((o) => { const iss = rowIssues(cfg, o, w.today, S.crm); return `<tr data-row="${esc(o.id)}">${cols.map((c) => cell(o, c, iss)).join('')}</tr>`; }).join('')}
+  </tbody></table></div>`;
+}
+const fmtDay = (d) => { const [y, m, dd] = d.split('-'); return `${+m}/${+dd}/${y.slice(2)}`; };
+
 // who may edit a row: leaders anything, reps their own. RLS enforces the same.
 export function canEditOpp(o) {
+  if (o.src === 'aspire') return false;
   if (S.admin) return true;
   if (!S.me || !S.me.active) return false;
   if (S.me.role === 'leader') return true;

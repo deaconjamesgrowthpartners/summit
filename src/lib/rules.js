@@ -2,13 +2,16 @@
 import { validDate, addDays, daysBetween, money } from './format.js';
 
 const NO_STAGE = { name: '', prob: 0, status: 'open', needs_close: false, bid: false, hold: false };
+// a CRM status the workspace config does not list: never open, won or lost, never weighted
+const UNKNOWN = { name: '', prob: 0, status: 'unknown', needs_close: false, bid: false, hold: false };
 
-export const stageOf = (cfg, o) => cfg.stageBy[o.stage] || NO_STAGE;
+export const stageOf = (cfg, o) => cfg.stageBy[o.stage] || (o.src === 'aspire' ? UNKNOWN : NO_STAGE);
 export const prob = (cfg, o) => stageOf(cfg, o).prob;
 export const weighted = (cfg, o) => (+o.value || 0) * prob(cfg, o);
 export const isOpen = (cfg, o) => stageOf(cfg, o).status === 'open';
 export const isWon = (cfg, o) => stageOf(cfg, o).status === 'won';
 export const isLost = (cfg, o) => stageOf(cfg, o).status === 'lost';
+export const isUnknown = (cfg, o) => stageOf(cfg, o).status === 'unknown';
 export const bidOut = (cfg, o) => isOpen(cfg, o) && stageOf(cfg, o).bid;
 export function isRecurring(cfg, o) {
   const c = cfg.catBy[o.category];
@@ -37,6 +40,9 @@ export function autoDid(cfg, opps, memberId, key) {
     won_value: sum(won),
     starts_next_week_value: sum(starts),
   };
+  // Aspire sends no bid-sent date, so bids cannot come from the board there. Reps type them,
+  // instead of the board claiming a zero.
+  if (cfg.pipelineSource === 'aspire') { delete src.bids_count; delete src.bids_value; }
   const out = {};
   for (const m of cfg.measures) if (m.auto && m.auto in src) out[m.key] = src[m.auto];
   return out;
@@ -49,8 +55,27 @@ export function didValue(c, auto, k) {
 }
 export const comValue = (c, k) => (c ? +(c.committed?.[k]) || 0 : 0);
 
+// an Aspire deal: only what can be fixed in Aspire, and only for live work. Open deals, deals
+// with a status the config does not know, and work won this year. Old won and lost work stays quiet.
+function aspireIssues(cfg, o, today) {
+  const iss = [];
+  const s = stageOf(cfg, o), crm = cfg.crmLabel;
+  const thisYear = isWon(cfg, o) && validDate(o.actual_close) && o.actual_close.slice(0, 4) === today.slice(0, 4);
+  if (!o.status_known) iss.push({ t: o.status_name ? `${crm} status not mapped: ${o.status_name}` : `No status in ${crm}`, f: 'stage', sev: 'y' });
+  if (o.unassigned && (isOpen(cfg, o) || isUnknown(cfg, o) || thisYear)) iss.push({ t: `${crm} rep not on the roster`, f: 'owner', sev: 'y' });
+  if (isOpen(cfg, o)) {
+    if (validDate(o.close_date) && o.close_date < today) iss.push({ t: 'Expected close is in the past', f: 'close_date', sev: 'r' });
+    if (s.bid && !validDate(o.start_date)) iss.push({ t: 'Bid sent, no target start date', f: 'start_date', sev: 'r' });
+    if (s.needs_close && !validDate(o.close_date)) iss.push({ t: 'No expected close date', f: 'close_date', sev: 'y' });
+    if (!(+o.value)) iss.push({ t: 'No estimated value', f: 'value', sev: 'y' });
+  }
+  if (thisYear && !validDate(o.start_date)) iss.push({ t: 'Won with no start date (cash forecast blind)', f: 'start_date', sev: 'y' });
+  return iss;
+}
+
 // everything wrong with a row. sev r = red flag, y = yellow
 export function rowIssues(cfg, o, today, crm) {
+  if (o.src === 'aspire') return aspireIssues(cfg, o, today);
   const iss = [];
   const s = stageOf(cfg, o);
   if (isOpen(cfg, o)) {
@@ -75,7 +100,7 @@ export function rowIssues(cfg, o, today, crm) {
 }
 
 export function flag(cfg, o, today, crm) {
-  if (!isOpen(cfg, o) && !isWon(cfg, o)) return 'n';
+  if (!isOpen(cfg, o) && !isWon(cfg, o)) return isUnknown(cfg, o) ? 'y' : 'n';
   const iss = rowIssues(cfg, o, today, crm);
   if (iss.some((i) => i.sev === 'r')) return 'r';
   if (validDate(o.next_step_date) && daysBetween(today, o.next_step_date) <= 3) return 'y';

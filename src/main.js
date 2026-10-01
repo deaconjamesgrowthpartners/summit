@@ -5,6 +5,7 @@ import { writeOpp, writeCommit, writeGoal, writeAccount, addOpp, acceptLate, onS
 import { $, toast, num, addDays } from './lib/format.js';
 import { applyBrand } from './lib/theme.js';
 import { stageOf, parseCrm, isWon } from './lib/rules.js';
+import { fromAspire } from './data/pipeline.js';
 import { renderHeader } from './views/header.js';
 import { renderSummit } from './views/summit.js';
 import { renderClimb } from './views/climb.js';
@@ -109,6 +110,12 @@ async function start() {
   }
 }
 
+// the board's deals: Summit's opps table, or the Aspire view turned into the same shape
+function setDeals(data) {
+  const rows = S.cfg.pipelineSource === 'aspire' ? (data.pipeline || []).map((r) => fromAspire(S.cfg, r)) : data.opps || [];
+  S.opps = Object.fromEntries(rows.map((o) => [o.id, o]));
+}
+
 async function openWorkspace(slug) {
   teardown();
   const row = await api.workspace(slug).catch(() => null);
@@ -118,11 +125,11 @@ async function openWorkspace(slug) {
   applyBrand(S.cfg.brand);
   document.title = `Summit · ${S.cfg.name}`;
   const w = wk();
-  const data = await api.load(S.cfg.id, addDays(w.prevKey, -77));
+  const data = await api.load(S.cfg.id, addDays(w.prevKey, -77), S.cfg.pipelineSource);
   S.members = data.members;
   S.me = data.members.find((m) => m.user_id === S.user.id && m.active) || null;
   if (!S.me && !S.admin) { teardown(); return renderGate(app, { title: 'Nothing here', body: 'Check the link, or sign in with the email your team uses.' }); }
-  S.opps = Object.fromEntries(data.opps.map((o) => [o.id, o]));
+  setDeals(data);
   S.commits = Object.fromEntries(data.commits.map((c) => [ckey(c.member_id, c.week_key), c]));
   S.accounts = Object.fromEntries((data.accounts || []).map((a) => [a.id, a]));
   S.goalsRow = pickGoals(data.goals, w.year);
@@ -153,15 +160,16 @@ async function syncNow(full) {
   }
   S.syncing = false;
   S.sync = (await api.syncLog(S.cfg.id).catch(() => null)) || S.sync;
+  if (S.cfg.pipelineSource === 'aspire') await refresh();
   renderAll();
 }
 
 async function refresh() {
   if (!S.cfg) return;
   try {
-    const data = await api.load(S.cfg.id, addDays(wk().prevKey, -77));
+    const data = await api.load(S.cfg.id, addDays(wk().prevKey, -77), S.cfg.pipelineSource);
     S.members = data.members;
-    S.opps = Object.fromEntries(data.opps.map((o) => [o.id, o]));
+    setDeals(data);
     S.commits = Object.fromEntries(data.commits.map((c) => [ckey(c.member_id, c.week_key), c]));
     S.accounts = Object.fromEntries((data.accounts || []).map((a) => [a.id, a]));
     S.goalsRow = pickGoals(data.goals, wk().year) || S.goalsRow;
@@ -179,6 +187,7 @@ setInterval(() => S.cfg && renderSoon(), 60000);
 
 function onLive(table, type, row, old) {
   if (table === 'opps') {
+    if (S.cfg.pipelineSource === 'aspire') return; // the board reads Aspire. typed opps stay in the table, off the board
     if (type === 'DELETE') delete S.opps[old?.id];
     else if (row) S.opps[row.id] = { ...S.opps[row.id], ...row };
   } else if (table === 'commits') {

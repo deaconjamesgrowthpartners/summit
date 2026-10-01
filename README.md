@@ -29,6 +29,8 @@ Env (optional, the publishable key and URL are the defaults):
      book block on the Grow tab and the book tiles on the Summit tab.
    - `007_aspire_sync.sql`: the Aspire sync tables, views, SQL functions and the nightly pg_cron job.
      See "Aspire sync" below.
+   - `008_aspire_pipeline_board.sql`: `workspaces.pipeline`, which points the board at Aspire and maps every
+     Aspire status to open, won or lost. The views read the same map. See "The board reads Aspire" below.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
@@ -110,6 +112,31 @@ Run it:
 `npm test` checks the sync against a simulated Aspire. With a local Postgres,
 `SUMMIT_TEST_PG="host=... port=... user=..." npm test` also runs migration 007 end to end
 (`test/sql/aspire-sync.test.sql`).
+
+## The board reads Aspire
+
+With `workspaces.pipeline.source = "aspire"` (Elevation, set by 008), the six screens read `aspire_pipeline` instead
+of `opps`. Open pipeline, coverage, win rate, the cash ladder, the branch table, the team lists, All Accounts and
+Data Check all count Aspire deals. Commits, goals and the maintenance book are unchanged and stay typed in Summit.
+The `opps` table is left as it was, off the board.
+
+The status map lives in the config, not the code. Each status has `status` (open, won or lost), `prob` (the weight
+for weighted pipeline, coverage and the cash ladder), and optional `bid` and `needs_close` flags:
+- open: New, Bidding, Pending Approval, Approved
+- won: Won, Delivered. Delivered is sold work and never counts as open.
+- lost: Lost
+- anything else, including a blank status, is unknown. It is never counted as open, won or lost. Data Check
+  counts it under "Every deal accounted for" and lists each deal under "No status in Aspire".
+
+`divisions` maps an Aspire division to a Summit category where the names differ (`Enhancements` already matches
+`Enhancement`). A division with no category counts everywhere except recurring, and Data Check lists it.
+
+Deals whose Aspire rep is not on the roster stay on the board. They count in every total, show the Aspire name with a
+plain "not on roster" tag, and have their own filter on All Accounts. Aspire deals are read only in Summit: fix them in
+Aspire and the nightly sync brings the change. Aspire has no bid-sent date, so the bid measures are typed by the rep
+rather than filled from the board. Signed and win rate count work won (and lost) this calendar year.
+
+Run the demo this way with `?pipeline=aspire`.
 
 ## Aspire probe (discovery only)
 

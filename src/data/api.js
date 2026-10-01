@@ -57,16 +57,22 @@ export async function isAdmin(userId) {
   const rows = must(await sb.from('app_admins').select('user_id').eq('user_id', userId));
   return rows.length > 0;
 }
-export async function load(wsId, sinceWeek) {
+// source "aspire": deals come from the aspire_pipeline view, not the opps table. opps is left alone.
+export async function load(wsId, sinceWeek, source = 'summit') {
+  const deals = source === 'aspire'
+    ? all(() => sb.from('aspire_pipeline').select('*').eq('workspace_id', wsId).order('opportunity_id'))
+    : all(() => sb.from('opps').select('*').eq('workspace_id', wsId).order('created_at'));
   const [members, opps, commits, goals, accounts] = await Promise.all([
     all(() => sb.from('members').select('*').eq('workspace_id', wsId).order('full_name')),
-    all(() => sb.from('opps').select('*').eq('workspace_id', wsId).order('created_at')),
+    deals,
     all(() => sb.from('commits').select('*').eq('workspace_id', wsId).gte('week_key', sinceWeek)),
     all(() => sb.from('goals').select('*').eq('workspace_id', wsId)),
     // the book is optional. a workspace without one still loads.
     all(() => sb.from('accounts').select('*').eq('workspace_id', wsId).order('property')).catch(() => []),
   ]);
-  return { members, opps, commits, goals, accounts, sync: await syncLog(wsId) };
+  return source === 'aspire'
+    ? { members, opps: [], pipeline: opps, commits, goals, accounts, sync: await syncLog(wsId) }
+    : { members, opps, commits, goals, accounts, sync: await syncLog(wsId) };
 }
 // the Aspire sync log and the names Aspire has that the roster does not. null before migration 007.
 export async function syncLog(wsId) {
