@@ -215,8 +215,11 @@ begin
 end $$;
 
 -- one page of raw Aspire records in. a row is only rewritten when its record changed.
+-- statement_timeout: the API role's default (8s on Supabase) is too short for a page of big
+-- records. The function's own setting is applied by PostgREST for this call only, so a slow
+-- page fails that page, not the run, and nothing else gets a longer timeout.
 create or replace function aspire_sync_upsert(p_run bigint, p_rows jsonb)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public set statement_timeout = '60s' as $$
 declare
   r aspire_sync_runs; n_src int; n_ins int; n_upd int; top_mod timestamp;
 begin

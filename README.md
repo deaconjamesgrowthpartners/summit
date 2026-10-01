@@ -85,7 +85,8 @@ Env (optional, the publishable key and URL are the defaults):
   `aspire_sync_runs` (the log), through three SQL functions only the service role can call. `opps`, commits,
   goals and the book are never touched.
 - First run pulls everything. After that, `ModifiedDate ge` one day before the newest ModifiedDate the last
-  good run saw. Pages by key: `OpportunityID gt <last>`, ordered by OpportunityID, `$top=1000`.
+  good run saw. Pages by key: `OpportunityID gt <last>`, ordered by OpportunityID, 200 a page (`{"pageSize": n}`
+  in the body changes it, up to 1000). A page Summit fails to save is logged and skipped; the run ends partial.
 - A row is only rewritten when its record changed. A complete full pull marks rows Aspire no longer returns
   as removed. They leave the view, not the table.
 - A run that runs out of time keeps what it got, logs `partial`, and does not move the cutoff.

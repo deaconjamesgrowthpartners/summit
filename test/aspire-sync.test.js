@@ -68,9 +68,9 @@ const go = (a, db, { aspire: more = {}, ...extra } = {}) =>
 // no test may reach the network
 globalThis.fetch = async (u) => { throw new Error(`test tried the network: ${u}`); };
 
-test('first run: full pull, pages by key at $top=1000, stops on the short page', async () => {
+test('first run: full pull, pages by key, stops on the short page', async () => {
   const a = aspire(), db = summit();
-  const r = await go(a, db);
+  const r = await go(a, db, { pageSize: 1000 });
   assert.equal(r.status, 'ok');
   assert.equal(db.table.size, 2500);
   const gets = a.seen.filter((c) => c.method === 'GET');
@@ -82,7 +82,7 @@ test('first run: full pull, pages by key at $top=1000, stops on the short page',
 
 test('a lower page cap at Aspire still gets every row, once', async () => {
   const a = aspire({ n: 930, cap: 400 }), db = summit();
-  const r = await go(a, db);
+  const r = await go(a, db, { pageSize: 1000 });
   assert.equal(r.status, 'ok');
   assert.equal(db.table.size, 930);
   assert.equal(db.run.pulled, 930);
@@ -107,7 +107,7 @@ test('{"full": true} forces a full pull even with a watermark', async () => {
 
 test('if Aspire ignores the key filter, it stops with an error instead of counting twice', async () => {
   const db = summit();
-  const r = await go(aspire({ ignoreGt: true }), db);
+  const r = await go(aspire({ ignoreGt: true }), db, { pageSize: 1000 });
   assert.equal(r.status, 'error');
   assert.equal(db.table.size, 1000);
   assert.match(db.run.errors[0], /ignored the OpportunityID order or the gt filter/);
@@ -169,6 +169,35 @@ test('a login failure is logged as an error, with no secret in it', async () => 
   assert.equal(r.status, 'error');
   assert.match(db.run.errors[0], /Aspire login failed \(401\)/);
   assert.ok(!JSON.stringify(db.run).includes('wrong'));
+});
+
+test('pages default to 200 and pageSize overrides it, kept between 1 and 1000', async () => {
+  const tops = async (pageSize) => {
+    const a = aspire({ n: 930 });
+    await go(a, summit(), pageSize === undefined ? {} : { pageSize });
+    return [...new Set(a.seen.filter((c) => c.method === 'GET').map((c) => c.top))];
+  };
+  assert.deepEqual(await tops(), ['200']);
+  assert.deepEqual(await tops(50), ['50']);
+  assert.deepEqual(await tops(5000), ['1000']);
+  assert.deepEqual(await tops(0), ['200']);
+});
+
+test('a page Summit fails to save fails that page, not the run: the rest still land, the run ends partial', async () => {
+  const a = aspire({ n: 930 }), db = summit();
+  const rpc = db.rpc.bind(db);
+  let n = 0;
+  db.rpc = async (fn, args) => {
+    if (fn === 'aspire_sync_upsert' && ++n === 2) throw new Error('aspire_sync_upsert: canceling statement due to statement timeout');
+    return rpc(fn, args);
+  };
+  const r = await go(a, db);
+  assert.equal(r.status, 'partial');
+  assert.equal(db.table.size, 730, 'every page but the failed one saved');
+  assert.equal(db.run.errors.length, 1);
+  assert.match(db.run.errors[0], /page 2 \(OpportunityID 201 to 400, 200 rows\) was not saved: .*statement timeout/);
+  assert.equal(db.run.complete, false, 'no rows get marked removed after a partial run');
+  assert.ok(db.run.notes.some((x) => /time to save each page: .*failed/.test(x)));
 });
 
 test('the client itself has no way to send anything but GET', () => {

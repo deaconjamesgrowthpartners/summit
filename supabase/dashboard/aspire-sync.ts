@@ -192,10 +192,11 @@ export function aspireClient(opts: AspireOptions) {
 // Those only write aspire_opps and aspire_sync_runs. opps, commits, goals and the book are never touched.
 //
 // Full pull on the first run, then ModifiedDate since the last good run. Pages by key:
-// OpportunityID gt <last seen>, ordered by OpportunityID asc, $top=1000. $count does not work at
+// OpportunityID gt <last seen>, ordered by OpportunityID asc, $top=200 (pageSize). $count does not work at
 // Aspire, so a pull ends on an empty page or a short one. Each page is written as it arrives, so
 // a run that runs out of time keeps what it got, is logged as partial, and does not move the
-// watermark. The next run picks it up.
+// watermark. The next run picks it up. A page Summit fails to write is logged and skipped; the
+// run carries on, ends partial, and the next run pulls those rows again.
 
 
 export interface Db { rpc: (fn: string, args: Record<string, unknown>) => Promise<any> }
@@ -227,12 +228,12 @@ export interface SyncArgs {
   workspace?: string | null;
   full?: boolean;
   trigger?: string;
-  pageSize?: number;
+  pageSize?: number; // 1 to 1000. Aspire accepts $top up to 1000
   maxPages?: number;
 }
 
 export async function runSync(a: SyncArgs) {
-  const pageSize = a.pageSize ?? 1000;
+  const pageSize = Math.min(1000, Math.max(1, Math.floor(Number(a.pageSize) || 200)));
   const maxPages = a.maxPages ?? 200;
   let begin: any;
   try {
@@ -243,13 +244,16 @@ export async function runSync(a: SyncArgs) {
   if (!begin || begin.error) return { status: 'refused', error: begin?.error || 'aspire_sync_begin returned nothing' };
 
   const aspire = aspireClient(a.aspire);
-  const errors: string[] = [];
+  const errors: string[] = [];      // the run stopped
+  const pageErrors: string[] = [];  // a page failed to save; the run carried on
   const notes: string[] = [];
+  const writes: string[] = [];
   let complete = false;
   try {
     const since = begin.mode === 'incremental' && begin.since ? `${begin.since}Z` : null;
     if (since) notes.push(`incremental: ModifiedDate ge ${since}`);
     else notes.push('full pull');
+    notes.push(`pages of ${pageSize}`);
     let last: number | null = null;
     let largest = 0;
     for (let page = 1; page <= maxPages; page++) {
@@ -267,7 +271,14 @@ export async function runSync(a: SyncArgs) {
         errors.push(`page ${page}: Aspire ignored the OpportunityID order or the gt filter. Stopped so nothing is counted twice`);
         break;
       }
-      await a.db.rpc('aspire_sync_upsert', { p_run: begin.run_id, p_rows: recs });
+      const t0 = Date.now();
+      try {
+        await a.db.rpc('aspire_sync_upsert', { p_run: begin.run_id, p_rows: recs });
+        writes.push(`${((Date.now() - t0) / 1000).toFixed(1)}s`);
+      } catch (e) {
+        pageErrors.push(`page ${page} (OpportunityID ${ids[0]} to ${ids[ids.length - 1]}, ${recs.length} rows) was not saved: ${String((e as any)?.message || e)}`);
+        writes.push('failed');
+      }
       last = ids[ids.length - 1];
       largest = Math.max(largest, recs.length);
       if (page > 1 && recs.length < largest) { complete = true; break; } // a short page after a full one is the last
@@ -276,18 +287,21 @@ export async function runSync(a: SyncArgs) {
   } catch (e) {
     errors.push(String((e as any)?.message || e));
   }
+  if (writes.length) notes.push(`time to save each page: ${writes.join(', ')}`);
   const st = aspire.stats();
   if (st.throttled) notes.push(`throttled ${st.throttled} time(s), backed off and retried`);
   if (st.relogins) notes.push('the Aspire token expired mid-run, logged in again');
-  const status = errors.length ? 'error' : complete ? 'ok' : 'partial';
+  // a failed page means rows are missing: partial, so the cutoff stays put and nothing is marked removed
+  const status = errors.length ? 'error' : complete && !pageErrors.length ? 'ok' : 'partial';
+  const allErrors = [...pageErrors, ...errors];
   try {
     const run = await a.db.rpc('aspire_sync_finish', {
-      p_run: begin.run_id, p_status: status, p_calls: st.calls, p_errors: errors, p_notes: notes, p_complete: complete && !errors.length,
+      p_run: begin.run_id, p_status: status, p_calls: st.calls, p_errors: allErrors, p_notes: notes, p_complete: status === 'ok',
     });
     return { status, seconds: st.seconds, run };
   } catch (e) {
     // the run stays "running" in the log; the next run closes it out after 15 minutes
-    return { status: 'error', seconds: st.seconds, run_id: begin.run_id, errors: [...errors, `could not log the end of the run: ${String((e as any)?.message || e)}`] };
+    return { status: 'error', seconds: st.seconds, run_id: begin.run_id, errors: [...allErrors, `could not log the end of the run: ${String((e as any)?.message || e)}`] };
   }
 }
 
@@ -302,6 +316,7 @@ export async function runSync(a: SyncArgs) {
 //   {"full": true}           re-pull everything instead of ModifiedDate since the last good run
 //   {"workspace": "<slug>"}  only needed if more than one workspace has crm_source = 'aspire'
 //   {"trigger": "cron"}      a label for the log
+//   {"pageSize": 200}        records per Aspire page and per write to Summit. Default 200, max 1000
 //
 // Deploy:  paste supabase/dashboard/aspire-sync.ts into the dashboard editor as "aspire-sync"
 //          or: supabase functions deploy aspire-sync --project-ref tyrtzxnhwjchtemytfxv
@@ -333,6 +348,7 @@ Deno.serve(async (req) => {
     workspace: typeof body.workspace === 'string' ? body.workspace : null,
     full: body.full === true,
     trigger: body.trigger === 'cron' ? 'cron' : 'manual',
+    pageSize: Number.isInteger(body.pageSize) ? body.pageSize : undefined,
   });
   const code = result.status === 'refused' ? 409 : result.status === 'error' ? 502 : 200;
   return reply({ allowed_via: gate.via, ...result }, code);

@@ -8,6 +8,7 @@
 //   {"full": true}           re-pull everything instead of ModifiedDate since the last good run
 //   {"workspace": "<slug>"}  only needed if more than one workspace has crm_source = 'aspire'
 //   {"trigger": "cron"}      a label for the log
+//   {"pageSize": 200}        records per Aspire page and per write to Summit. Default 200, max 1000
 //
 // Deploy:  paste supabase/dashboard/aspire-sync.ts into the dashboard editor as "aspire-sync"
 //          or: supabase functions deploy aspire-sync --project-ref tyrtzxnhwjchtemytfxv
@@ -41,6 +42,7 @@ Deno.serve(async (req) => {
     workspace: typeof body.workspace === 'string' ? body.workspace : null,
     full: body.full === true,
     trigger: body.trigger === 'cron' ? 'cron' : 'manual',
+    pageSize: Number.isInteger(body.pageSize) ? body.pageSize : undefined,
   });
   const code = result.status === 'refused' ? 409 : result.status === 'error' ? 502 : 200;
   return reply({ allowed_via: gate.via, ...result }, code);

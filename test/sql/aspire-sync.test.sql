@@ -112,6 +112,7 @@ begin
   assert (select body from net.calls order by id desc limit 1) = '{"full": true, "trigger": "manual"}', 'manual body';
   assert (select headers->>'Authorization' from net.calls order by id desc limit 1) = 'Bearer sk-test', 'key sent';
   assert (select url from net.calls order by id desc limit 1) like '%/functions/v1/aspire-sync', 'url';
+  assert (select proconfig @> '{statement_timeout=60s}' from pg_proc where proname = 'aspire_sync_upsert'), 'upsert carries its own 60s statement timeout';
   raise notice 'sync checks passed';
 end $$;
 
