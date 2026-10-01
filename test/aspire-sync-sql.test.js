@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 const PG = process.env.SUMMIT_TEST_PG;
 
-test('migrations 007, 008 and 009 run twice and every sync and board check passes', { skip: !PG && 'set SUMMIT_TEST_PG to run the SQL checks' }, () => {
+test('migrations 007 to 010 run twice and every sync and board check passes', { skip: !PG && 'set SUMMIT_TEST_PG to run the SQL checks' }, () => {
   const db = `summit_t${process.pid}`;
   const psql = (args, url = `${PG} dbname=postgres`) => execFileSync('psql', [url, '-q', '-v', 'ON_ERROR_STOP=1', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   psql(['-c', `create database ${db}`]);
@@ -24,6 +24,8 @@ test('migrations 007, 008 and 009 run twice and every sync and board check passe
     execFileSync('psql', [target, '-q', '-v', 'ON_ERROR_STOP=1', '-v', 'mig8=supabase/migrations/008_aspire_pipeline_board.sql', '-f', 'test/sql/pipeline-board.test.sql'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     // 009 on top: division rules, win rate, test data
     execFileSync('psql', [target, '-q', '-v', 'ON_ERROR_STOP=1', '-v', 'mig9=supabase/migrations/009_aspire_board_rules.sql', '-f', 'test/sql/board-rules.test.sql'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // 010 on top: new maintenance basis and PropertyID
+    execFileSync('psql', [target, '-q', '-v', 'ON_ERROR_STOP=1', '-v', 'mig10=supabase/migrations/010_new_maintenance_basis.sql', '-f', 'test/sql/new-maintenance.test.sql'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) {
     assert.fail(String(e.stderr || e.message));
   } finally {

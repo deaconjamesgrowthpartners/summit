@@ -42,6 +42,7 @@ export function fromAspire(cfg, r) {
   return {
     id: `aspire:${r.opportunity_id}`,
     src: 'aspire',
+    property_id: r.property_id != null && r.property_id !== '' ? String(r.property_id) : null,
     crm_ref: r.opportunity_number != null && r.opportunity_number !== '' ? String(r.opportunity_number) : String(r.opportunity_id),
     account: r.property_name || r.opportunity_name || `${cfg.crmLabel} #${r.opportunity_id}`,
     job: r.property_name ? job : '',

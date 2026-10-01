@@ -1,9 +1,9 @@
-import { S, wk, goals, isCompany, scopeLabel, oppsScoped, repsScoped, commitFor, tabFor, accountsScoped, branchList, fromCrm } from '../data/store.js';
+import { S, wk, goals, isCompany, scopeLabel, oppsScoped, oppsAll, repsScoped, commitFor, tabFor, accountsScoped, branchList, fromCrm } from '../data/store.js';
 import { repCell } from './grid.js';
 import { bookTile } from './book.js';
 import { esc, money, pct, fmtDate, addDays, dow, daysBetween, validDate } from '../lib/format.js';
 import { mLabel } from '../data/workspace.js';
-import { isOpen, isWon, isLost, isUnknown, isRecurring, weighted, bidOut, sum, ryg, autoDid, didValue, comValue, flag, rowIssues, goalActual, winRateOf } from '../lib/rules.js';
+import { isOpen, isWon, isLost, isUnknown, isRecurring, weighted, bidOut, sum, ryg, autoDid, didValue, comValue, flag, rowIssues, goalDetail, winRateOf } from '../lib/rules.js';
 
 const tile = (cls, l, v, s, extra = '') =>
   `<div class="tile ${cls}"><span class="stripe"></span><div class="l">${l}</div><div class="v">${v}</div>${extra}${s ? `<div class="s">${s}</div>` : ''}</div>`;
@@ -26,20 +26,26 @@ export function renderSummit(el) {
   const bids = open.filter((o) => bidOut(cfg, o));
 
   // goal tiles
+  // history for "new to the book" is every deal the workspace holds, not just this screen's scope
   const gt = cfg.goalTiles.map((t) => {
-    const actual = goalActual(cfg, t, g, rows, won, S.goalsRow?.period || yr);
+    const det = goalDetail(cfg, t, g, rows, won, S.goalsRow?.period || yr, oppsAll());
+    const actual = det.actual;
     const goal = +g[t.goal] || 0;
     const deadline = t.deadline ? g[t.deadline] : null;
     const daysLeft = validDate(deadline) ? Math.max(0, daysBetween(w.today, deadline)) : null;
-    return { t, actual, goal, deadline, daysLeft };
+    return { t, actual, goal, deadline, daysLeft, det };
   });
+  // what the tile counted, said plainly: new properties, and the renewals it left out
+  const basisNote = (det) => (det && det.basis === 'new_properties'
+    ? ` · ${det.properties} new ${det.properties === 1 ? 'property' : 'properties'}${det.renewals ? ` · ${money(det.renewals)} renewals not counted` : ''}`
+    : '');
   let goalHtml = '';
   if (company) {
-    goalHtml = gt.map(({ t, actual, goal, deadline, daysLeft }) => {
+    goalHtml = gt.map(({ t, actual, goal, deadline, daysLeft, det }) => {
       if (deadline) {
-        const p = Math.min(100, pct(actual, goal));
+        const raw = pct(actual, goal), p = Math.min(100, raw);
         return tile(p >= 100 ? 'g' : p >= 70 ? 'y' : 'r', `${esc(t.label)} vs ${fmtDate(deadline)}`,
-          `${money(actual)} <small>/ ${money(goal)}</small>`, `${p}%${daysLeft != null ? ` · ${daysLeft} days left` : ''}`,
+          `${money(actual)} <small>/ ${money(goal)}</small>`, `${raw}%${daysLeft != null ? ` · ${daysLeft} days left` : ''}${basisNote(det)}`,
           `<div class="prog"><i style="width:${p}%"></i></div>`);
       }
       return tile('', esc(t.label), `${money(actual)} <small>/ ${money(goal)}</small>`, t.as_of ? esc(g[t.as_of] || '') : '');
@@ -52,11 +58,19 @@ export function renderSummit(el) {
 
   // coverage on the gap, for tiles that ask for it
   const covTiles = company ? gt.filter((x) => x.t.coverage && x.t.source === 'won_recurring') : [];
+  // the pipeline that can close the gap is open recurring work on the same footing as the goal: new
+  // properties when the goal counts new properties. Renewals cannot cover a new-business gap.
+  // Coverage never reads 0.0x because the goal is met: that tile says met, and shows the pipeline.
   const covHtml = covTiles.length
-    ? covTiles.map(({ actual, goal }) => {
+    ? covTiles.map(({ actual, goal, det }) => {
         const gap = Math.max(0, goal - actual);
-        const cov = gap ? sum(open.filter((o) => isRecurring(cfg, o)), (o) => weighted(cfg, o)) / gap : 0;
-        return tile(cov >= 3 ? 'g' : cov >= 1.5 ? 'y' : 'r', 'Coverage on the gap', `${cov.toFixed(1)}x`, `${money(gap)} to go · weighted recurring pipeline ÷ gap`);
+        const pipe = open.filter((o) => isRecurring(cfg, o) && (!det?.isNew || det.isNew(o)));
+        const wtd = sum(pipe, (o) => weighted(cfg, o));
+        const what = det?.basis === 'new_properties' ? 'weighted recurring pipeline on new properties' : 'weighted recurring pipeline';
+        if (!goal) return tile('', 'Coverage on the gap', '—', 'no goal set');
+        if (!gap) return tile('g', 'Coverage on the gap', 'Goal met', `${money(wtd)} ${what} still open · ${pipe.length} deals`);
+        const cov = wtd / gap;
+        return tile(cov >= 3 ? 'g' : cov >= 1.5 ? 'y' : 'r', 'Coverage on the gap', `${cov.toFixed(1)}x`, `${money(gap)} to go · ${money(wtd)} ${what} ÷ gap`);
       }).join('')
     : tile('', 'Bids out', money(sum(bids)), `${bids.length} waiting on a yes`);
 

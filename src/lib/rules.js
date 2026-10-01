@@ -48,18 +48,52 @@ export function autoDid(cfg, opps, memberId, key) {
   return out;
 }
 
-// actual for a goal tile, from the board or typed in by leadership. A won_recurring tile with a
-// deadline counts recurring work won inside its window: from its start (Jan 1 of the goal period if
-// unset) to the deadline. Without a deadline, recurring work signed this year.
-export function goalActual(cfg, t, g, rows, wonThisYear, period) {
-  if (t.source !== 'won_recurring') return +g[t.actual] || 0;
+// a goal tile's window: from its start (Jan 1 of the goal period if unset) to its deadline
+export function goalWindow(t, g, period) {
   const deadline = t.deadline && validDate(g[t.deadline]) ? g[t.deadline] : null;
-  if (!deadline) return sum(wonThisYear.filter((o) => isRecurring(cfg, o)));
   const start = t.start && validDate(g[t.start]) ? g[t.start] : `${String(period).slice(0, 4)}-01-01`;
-  return sum(rows.filter((o) => isWon(cfg, o) && isRecurring(cfg, o) && (o.actual_close
-    ? o.actual_close >= start && o.actual_close <= deadline
-    : o.src !== 'aspire')));
+  return { start, deadline };
 }
+
+// one property, however Aspire spells it: PropertyID when there is one, else the name
+export const propertyKey = (o) => (o.property_id ? `id:${o.property_id}` : `name:${String(o.account || '').trim().toLowerCase()}`);
+
+// is this deal on a property new to the book? With new_maintenance_basis "new_properties" (the default
+// for CRM deals), a property is new when none of its deals was won recurring work before the window
+// opened. History is every deal the workspace holds, whatever the screen's scope. A won recurring
+// deal with no won date counts as history, since it cannot be placed inside the window.
+export function newPropertyTest(cfg, history, start) {
+  if (cfg.newMaintenanceBasis !== 'new_properties') return () => true;
+  const before = new Set();
+  for (const o of history) {
+    if (!isWon(cfg, o) || !isRecurring(cfg, o)) continue;
+    if (!validDate(o.actual_close) || o.actual_close < start) before.add(propertyKey(o));
+  }
+  return (o) => !before.has(propertyKey(o));
+}
+
+// actual for a goal tile, from the board or typed in by leadership. A won_recurring tile with a
+// deadline counts recurring work won inside its window, on properties new to the book unless the
+// config says all_recurring. Without a deadline, recurring work signed this year.
+export function goalDetail(cfg, t, g, rows, wonThisYear, period, history = rows) {
+  if (t.source !== 'won_recurring') return { actual: +g[t.actual] || 0 };
+  const { start, deadline } = goalWindow(t, g, period);
+  if (!deadline) return { actual: sum(wonThisYear.filter((o) => isRecurring(cfg, o))) };
+  const isNew = newPropertyTest(cfg, history, start);
+  const inWindow = rows.filter((o) => isWon(cfg, o) && isRecurring(cfg, o) && (o.actual_close
+    ? o.actual_close >= start && o.actual_close <= deadline
+    : o.src !== 'aspire'));
+  const fresh = inWindow.filter(isNew);
+  return {
+    actual: sum(fresh),
+    properties: new Set(fresh.map(propertyKey)).size,
+    renewals: sum(inWindow) - sum(fresh),
+    basis: cfg.newMaintenanceBasis,
+    start,
+    isNew,
+  };
+}
+export const goalActual = (...a) => goalDetail(...a).actual;
 
 // win rate, by the workspace's rule. "properties": each property once, won if any of its deals was
 // won, lost if it only lost. Renewals and change orders do not stack up wins. "off": no tile.

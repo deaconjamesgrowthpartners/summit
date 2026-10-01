@@ -57,6 +57,10 @@ export function normalize(ws) {
   };
   // win rate: properties (a property once a year), deals (every record), or off
   const winRate = ['properties', 'deals', 'off'].includes(pl.win_rate) ? pl.win_rate : 'deals';
+  // what counts toward a new maintenance goal: properties new to the book (the default), or every
+  // recurring dollar. Only CRM deals carry the history to tell them apart.
+  const newMaintenanceBasis = pipelineSource !== 'aspire' ? 'all_recurring'
+    : pl.new_maintenance_basis === 'all_recurring' ? 'all_recurring' : 'new_properties';
 
   const categories = arr(ws.categories)
     .map((c) => (typeof c === 'string' ? { name: c } : obj(c)))
@@ -101,6 +105,7 @@ export function normalize(ws) {
     divisionRules,
     exclude,
     winRate,
+    newMaintenanceBasis,
     categories,
     catBy,
     goalTiles,

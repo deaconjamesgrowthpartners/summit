@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalize } from '../src/data/workspace.js';
 import { fromAspire, categoryFor, isExcluded } from '../src/data/pipeline.js';
-import { isOpen, isWon, isLost, isUnknown, weighted, sum, rowIssues, flag, autoDid, goalActual, winRateOf } from '../src/lib/rules.js';
+import { isOpen, isWon, isLost, isUnknown, weighted, sum, rowIssues, flag, autoDid, goalActual, goalDetail, winRateOf, newPropertyTest } from '../src/lib/rules.js';
 
 const PIPELINE = {
   source: 'aspire',
@@ -129,7 +129,9 @@ test('signed this year splits into recurring and one-time', () => {
   assert.equal(sum(won.filter((o) => !o.recurring)), 300);
 });
 
-test('the new maintenance goal counts recurring work won inside the goal window', () => {
+test('all_recurring: the new maintenance goal counts every recurring dollar won inside the goal window', () => {
+  const cfg9 = normalize({ id: 'w', pipeline: { ...RULES, new_maintenance_basis: 'all_recurring' }, categories: [{ name: 'Maintenance', recurring: true }, { name: 'Install' }, { name: 'Enhancement' }], tabs: [] });
+  const d9 = (o) => fromAspire(cfg9, row(o));
   const tile = { source: 'won_recurring', deadline: 'deadline', start: 'newMaintStart' };
   const rows = [
     d9({ opportunity_id: 1, status_name: 'Won', division_name: 'COM - Maintenance', won_dollars: 100, won_date: '2026-07-15' }),
@@ -157,4 +159,53 @@ test('test data is excluded by exact name or whole word, and only then', () => {
   for (const p of ['Contest Park', 'Testa Farms', 'Samples Hardware', 'Oak HOA'])
     assert.equal(isExcluded(cfg9, { property_name: p, opportunity_name: 'Mulch' }), false, p);
   assert.equal(isExcluded(cfg, { property_name: 'Test HOA' }), false, 'no exclude list, nothing excluded');
+});
+
+// migration 010: new maintenance means properties new to the book
+test('new_properties is the default for Aspire workspaces; typed workspaces keep all recurring', () => {
+  assert.equal(cfg9.newMaintenanceBasis, 'new_properties');
+  assert.equal(normalize({ id: 'w', tabs: [] }).newMaintenanceBasis, 'all_recurring');
+});
+
+test('new_properties: renewals of contracts already in the book do not count toward new maintenance', () => {
+  const tile = { source: 'won_recurring', deadline: 'deadline', start: 'newMaintStart' };
+  const g = { deadline: '2026-09-30', newMaintStart: '2026-07-09' };
+  let id = 0;
+  const w = (prop, date, dollars, extra = {}) => d9({ opportunity_id: ++id, property_name: prop, status_name: 'Won', division_name: 'COM - Maintenance', won_dollars: dollars, won_date: date, ...extra });
+  const rows = [
+    w('Oak HOA', '2025-04-01', 50),           // Oak was already in the book
+    w('Oak HOA', '2026-08-01', 60),           //   so its renewal in the window does not count
+    w('Elm Park', '2026-07-20', 100),         // Elm is new in the window
+    w('Elm Park', '2026-09-01', 30),          //   and its add-on in the window counts too
+    w('Pine Ridge', '2026-03-01', 0, { division_name: 'COM - Enhancements' }), // one-time work before: still new to maintenance
+    w('Pine Ridge', '2026-08-15', 200),
+    w('Ash Court', null, 70),                 // won recurring, no date: history, so Ash is not new
+    w('Ash Court', '2026-08-02', 40),
+    w('Birch Way', '2026-10-05', 500),        // won after the deadline: not in the window
+  ];
+  const det = goalDetail(cfg9, tile, g, rows, [], '2026');
+  assert.equal(det.actual, 330);
+  assert.equal(det.properties, 2);
+  assert.equal(det.renewals, 100, 'Oak 60 and Ash 40 were in the window but not new');
+  assert.equal(goalActual(cfg9, tile, g, rows, [], '2026'), 330);
+});
+
+test('one property is one property: PropertyID wins over the name', () => {
+  const tile = { source: 'won_recurring', deadline: 'deadline', start: 'newMaintStart' };
+  const g = { deadline: '2026-09-30', newMaintStart: '2026-07-09' };
+  const rows = [
+    d9({ opportunity_id: 1, property_id: '55', property_name: 'Oak HOA', status_name: 'Won', won_dollars: 50, won_date: '2025-01-01' }),
+    d9({ opportunity_id: 2, property_id: '55', property_name: 'Oak H.O.A.', status_name: 'Won', won_dollars: 60, won_date: '2026-08-01' }),
+    d9({ opportunity_id: 3, property_id: '77', property_name: 'Oak HOA', status_name: 'Won', won_dollars: 90, won_date: '2026-08-01' }),
+  ];
+  assert.equal(goalActual(cfg9, tile, g, rows, [], '2026'), 90, 'a renamed renewal is still a renewal; a namesake is new');
+});
+
+test('history is the whole workspace, not the screen scope', () => {
+  const prior = d9({ opportunity_id: 1, member_id: 'other', status_name: 'Won', won_dollars: 50, won_date: '2025-01-01' });
+  const mine = d9({ opportunity_id: 2, member_id: 'me', status_name: 'Won', won_dollars: 60, won_date: '2026-08-01' });
+  const tile = { source: 'won_recurring', deadline: 'deadline', start: 'newMaintStart' };
+  const g = { deadline: '2026-09-30', newMaintStart: '2026-07-09' };
+  assert.equal(goalDetail(cfg9, tile, g, [mine], [], '2026', [prior, mine]).actual, 0);
+  assert.equal(newPropertyTest(cfg9, [prior], '2026-07-09')(mine), false);
 });

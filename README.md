@@ -33,6 +33,8 @@ Env (optional, the publishable key and URL are the defaults):
      Aspire status to open, won or lost. The views read the same map. See "The board reads Aspire" below.
    - `009_aspire_board_rules.sql`: division rules (recurring is anything with Maintenance in the division), win rate
      by property, the test-data exclude list, and the goal window start for New maintenance.
+   - `010_new_maintenance_basis.sql`: `new_maintenance_basis` (new properties or all recurring), and Aspire's
+     PropertyID on `aspire_pipeline`.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
@@ -141,7 +143,16 @@ opportunity names, `words` are whole words in either. Excluded deals are counted
 SQL views flag them the same way.
 
 The New maintenance goal counts recurring work won between its window start (a goal value set on Data Check, or
-Jan 1 of the goal period) and the deadline.
+Jan 1 of the goal period) and the deadline. `new_maintenance_basis` decides which of that work counts:
+- `new_properties` (the default): only properties with no won recurring deal before the window opened. Renewals
+  and add-ons to contracts already in the book don't count. The tile says how many new properties it counted
+  and how much renewal money it left out. History is every Aspire deal the workspace holds, whatever the screen
+  scope. A property is its Aspire PropertyID, or its name if it has none. A won recurring deal with no won date
+  counts as history.
+- `all_recurring`: every recurring dollar won in the window.
+
+Coverage on the gap uses the same rule: open recurring pipeline on new properties, weighted, divided by the gap.
+Once the goal is met, the tile says "Goal met" and shows the pipeline still open, never 0.0x.
 
 Deals whose Aspire rep is not on the roster stay on the board. They count in every total, show the Aspire name with a
 plain "not on roster" tag, and have their own filter on All Accounts. Aspire deals are read only in Summit: fix them in

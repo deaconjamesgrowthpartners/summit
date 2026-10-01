@@ -71,6 +71,7 @@ export const ASPIRE_PIPELINE = {
     { match: 'Construction', category: 'Install' },
   ],
   win_rate: 'properties',
+  new_maintenance_basis: 'new_properties',
   exclude: { names: ['John Test Property', 'Test All Out Door', 'Billy Bob Residence TEST'], words: ['test', 'sample'] },
 };
 
@@ -172,7 +173,7 @@ export function fixtures(now = new Date()) {
     const est = Math.round((maint ? 15000 + r() * 80000 : 3000 + r() * 45000) / 100) * 100;
     const wonDate = wonish ? addDays(d, -Math.round(r() * 420)) : null;
     return {
-      workspace_id: WS.id, opportunity_id: 20000 + i, opportunity_number: 7000 + i,
+      workspace_id: WS.id, opportunity_id: 20000 + i, opportunity_number: 7000 + i, property_id: null,
       opportunity_name: `${maint ? 'Annual maintenance' : pick(['Spring color', 'Irrigation repair', 'Hardscape', 'Tree work', 'Mulch'])} ${2026 - (i % 3)}`,
       // a quarter of the work repeats a property: renewals and change orders, the way Aspire logs them
       property_name: names[i % names.length] + (i % 4 === 0 || i < names.length ? '' : ` ${Math.floor(i / names.length) + 1}`),
@@ -187,6 +188,9 @@ export function fixtures(now = new Date()) {
       aspire_modified_at: addDays(d, -Math.round(r() * 30)) + 'T10:00:00', synced_at: now.toISOString(),
     };
   });
+  // PropertyID by property, the way Aspire keys them
+  const pid = {};
+  pipeline.forEach((x) => { x.property_id = String(pid[x.property_name] ??= 5000 + Object.keys(pid).length); });
   // test data Aspire carries, which the exclude list keeps off the board
   [['John Test Property', 'Mulch install', 'Won'], ['Test All Out Door', 'Spring color', 'Bidding'], ['Billy Bob Residence TEST', 'Sod', 'Won'],
     ['Riverside HOA', 'Sample estimate', 'Approved']].forEach(([prop, opp, status], i) => pipeline.push({
