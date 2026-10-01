@@ -10,7 +10,10 @@ if (pinned && !isNaN(Date.parse(pinned))) { const t0 = Date.parse(pinned), s0 = 
 export const demo = true;
 const db = fixtures(clock.now());
 // ?pipeline=aspire runs the demo the way Elevation runs after migration 008: deals from Aspire
-if (new URLSearchParams(location.search).get('pipeline') === 'aspire') db.workspaces.forEach((w) => Object.assign(w, { pipeline: ASPIRE_PIPELINE, crm_source: 'aspire' }));
+if (new URLSearchParams(location.search).get('pipeline') === 'aspire') {
+  db.workspaces.forEach((w) => Object.assign(w, { pipeline: ASPIRE_PIPELINE, crm_source: 'aspire',
+    goal_tiles: w.goal_tiles.map((t) => (t.key === 'newMaint' ? { ...t, start: 'newMaintStart' } : t)) }));
+}
 const listeners = [];
 const as = new URLSearchParams(location.search).get('as') || 'leader';
 const me = db.members.find((m) => m.email.includes(`+${as}@`)) || db.members[0];

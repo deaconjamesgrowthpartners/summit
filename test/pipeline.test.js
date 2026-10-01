@@ -3,8 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalize } from '../src/data/workspace.js';
-import { fromAspire, categoryFor } from '../src/data/pipeline.js';
-import { isOpen, isWon, isLost, isUnknown, weighted, sum, rowIssues, flag, autoDid } from '../src/lib/rules.js';
+import { fromAspire, categoryFor, isExcluded } from '../src/data/pipeline.js';
+import { isOpen, isWon, isLost, isUnknown, weighted, sum, rowIssues, flag, autoDid, goalActual, winRateOf } from '../src/lib/rules.js';
 
 const PIPELINE = {
   source: 'aspire',
@@ -103,4 +103,58 @@ test('auto-filled commits: won and starts come from Aspire; bids do not, because
   assert.equal(a.wonD, 800);
   assert.equal(a.startsD, 800);
   assert.equal('bidsN' in a, false, 'left for the rep to type');
+});
+
+// migration 009's rules
+const RULES = { ...PIPELINE,
+  divisions: [{ match: 'Maintenance', category: 'Maintenance' }, { match: 'Enhancement', category: 'Enhancement' }, { match: 'Construction', category: 'Install' }],
+  win_rate: 'properties',
+  exclude: { names: ['John Test Property', 'Test All Out Door', 'Billy Bob Residence TEST'], words: ['test', 'sample'] } };
+const cfg9 = normalize({ id: 'w', pipeline: RULES, categories: [{ name: 'Maintenance', recurring: true }, { name: 'Install' }, { name: 'Enhancement' }], tabs: [] });
+const d9 = (o) => fromAspire(cfg9, row(o));
+
+test('any division containing Maintenance is recurring; everything else is one-time', () => {
+  for (const d of ['COM - Maintenance', 'RES - Maintenance']) assert.equal(d9({ division_name: d }).recurring, true, d);
+  for (const d of ['COM - Enhancements', 'RES - Enhancements', 'COM - Construction', 'RES - Construction', 'IRR - Irrigation', 'PHC - Plant health Care', 'SNW - Snow', 'Indirect'])
+    assert.equal(d9({ division_name: d }).recurring, false, d);
+  assert.equal(d9({ division_name: 'RES - Enhancements' }).category, 'Enhancement');
+  assert.equal(d9({ division_name: 'COM - Construction' }).category, 'Install');
+  assert.equal(d9({ division_name: 'SNW - Snow' }).category, 'SNW - Snow');
+});
+
+test('signed this year splits into recurring and one-time', () => {
+  const won = [d9({ status_name: 'Won', division_name: 'COM - Maintenance', won_dollars: 700, won_date: '2026-03-01' }),
+    d9({ status_name: 'Delivered', division_name: 'RES - Enhancements', won_dollars: 300, won_date: '2026-04-01' })];
+  assert.equal(sum(won.filter((o) => o.recurring)), 700);
+  assert.equal(sum(won.filter((o) => !o.recurring)), 300);
+});
+
+test('the new maintenance goal counts recurring work won inside the goal window', () => {
+  const tile = { source: 'won_recurring', deadline: 'deadline', start: 'newMaintStart' };
+  const rows = [
+    d9({ opportunity_id: 1, status_name: 'Won', division_name: 'COM - Maintenance', won_dollars: 100, won_date: '2026-07-15' }),
+    d9({ opportunity_id: 2, status_name: 'Won', division_name: 'COM - Maintenance', won_dollars: 200, won_date: '2026-06-01' }),
+    d9({ opportunity_id: 3, status_name: 'Won', division_name: 'COM - Maintenance', won_dollars: 400, won_date: '2026-10-05' }),
+    d9({ opportunity_id: 4, status_name: 'Won', division_name: 'COM - Enhancements', won_dollars: 800, won_date: '2026-08-01' }),
+    d9({ opportunity_id: 5, status_name: 'Bidding', division_name: 'COM - Maintenance', estimated_dollars: 1600 }),
+  ];
+  assert.equal(goalActual(cfg9, tile, { deadline: '2026-09-30', newMaintStart: '2026-07-09' }, rows, [], '2026'), 100);
+  assert.equal(goalActual(cfg9, tile, { deadline: '2026-09-30' }, rows, [], '2026'), 300, 'no start set: the window opens Jan 1 of the goal period');
+});
+
+test('win rate by property: renewals and change orders count once; the tile can be switched off', () => {
+  const won = [d9({ property_name: 'Oak HOA' }), d9({ property_name: 'Oak HOA' }), d9({ property_name: ' oak hoa ' }), d9({ property_name: 'Elm Park' })];
+  const lost = [d9({ property_name: 'Pine Ridge' }), d9({ property_name: 'Oak HOA' })];
+  assert.deepEqual(winRateOf(cfg9, won, lost), { w: 2, l: 1, unit: 'properties' });
+  assert.deepEqual(winRateOf(cfg, won, lost), { w: 4, l: 2, unit: '' }, 'deals, when the config says nothing');
+  assert.equal(winRateOf({ winRate: 'off' }, won, lost), null);
+});
+
+test('test data is excluded by exact name or whole word, and only then', () => {
+  for (const p of ['John Test Property', 'test all out door', 'Billy Bob Residence TEST', 'Sample Street HOA', 'The Test Site'])
+    assert.ok(isExcluded(cfg9, { property_name: p, opportunity_name: 'Mulch' }), p);
+  assert.ok(isExcluded(cfg9, { property_name: 'Oak HOA', opportunity_name: 'Sample estimate' }), 'opportunity name counts too');
+  for (const p of ['Contest Park', 'Testa Farms', 'Samples Hardware', 'Oak HOA'])
+    assert.equal(isExcluded(cfg9, { property_name: p, opportunity_name: 'Mulch' }), false, p);
+  assert.equal(isExcluded(cfg, { property_name: 'Test HOA' }), false, 'no exclude list, nothing excluded');
 });

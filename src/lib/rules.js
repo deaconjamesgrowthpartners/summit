@@ -48,6 +48,31 @@ export function autoDid(cfg, opps, memberId, key) {
   return out;
 }
 
+// actual for a goal tile, from the board or typed in by leadership. A won_recurring tile with a
+// deadline counts recurring work won inside its window: from its start (Jan 1 of the goal period if
+// unset) to the deadline. Without a deadline, recurring work signed this year.
+export function goalActual(cfg, t, g, rows, wonThisYear, period) {
+  if (t.source !== 'won_recurring') return +g[t.actual] || 0;
+  const deadline = t.deadline && validDate(g[t.deadline]) ? g[t.deadline] : null;
+  if (!deadline) return sum(wonThisYear.filter((o) => isRecurring(cfg, o)));
+  const start = t.start && validDate(g[t.start]) ? g[t.start] : `${String(period).slice(0, 4)}-01-01`;
+  return sum(rows.filter((o) => isWon(cfg, o) && isRecurring(cfg, o) && (o.actual_close
+    ? o.actual_close >= start && o.actual_close <= deadline
+    : o.src !== 'aspire')));
+}
+
+// win rate, by the workspace's rule. "properties": each property once, won if any of its deals was
+// won, lost if it only lost. Renewals and change orders do not stack up wins. "off": no tile.
+export function winRateOf(cfg, won, lost) {
+  if (cfg.winRate === 'off') return null;
+  if (cfg.winRate === 'properties') {
+    const key = (o) => String(o.account || '').trim().toLowerCase();
+    const w = new Set(won.map(key)), l = new Set(lost.map(key).filter((k) => !w.has(k)));
+    return { w: w.size, l: l.size, unit: 'properties' };
+  }
+  return { w: won.length, l: lost.length, unit: '' };
+}
+
 export const hasVal = (v) => v !== undefined && v !== null && v !== '';
 export function didValue(c, auto, k) {
   if (c && c.actual && hasVal(c.actual[k])) return +c.actual[k];

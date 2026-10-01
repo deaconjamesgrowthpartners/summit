@@ -18,6 +18,7 @@ export const S = {
   sort: {},
   crm: null,          // pasted CRM export, id -> { status, value }
   sync: null,         // Aspire sync: { runs, unmatched }. null when the workspace has none
+  excluded: [],       // CRM deals the workspace's exclude list keeps off the board (test data)
   syncing: false,
   live: 'connecting',
 };

@@ -31,6 +31,8 @@ Env (optional, the publishable key and URL are the defaults):
      See "Aspire sync" below.
    - `008_aspire_pipeline_board.sql`: `workspaces.pipeline`, which points the board at Aspire and maps every
      Aspire status to open, won or lost. The views read the same map. See "The board reads Aspire" below.
+   - `009_aspire_board_rules.sql`: division rules (recurring is anything with Maintenance in the division), win rate
+     by property, the test-data exclude list, and the goal window start for New maintenance.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
@@ -128,8 +130,18 @@ for weighted pipeline, coverage and the cash ladder), and optional `bid` and `ne
 - anything else, including a blank status, is unknown. It is never counted as open, won or lost. Data Check
   counts it under "Every deal accounted for" and lists each deal under "No status in Aspire".
 
-`divisions` maps an Aspire division to a Summit category where the names differ (`Enhancements` already matches
-`Enhancement`). A division with no category counts everywhere except recurring, and Data Check lists it.
+`divisions` is a list of rules. `match` is found anywhere in the Aspire division name, ignoring case, and the first
+match sets the Summit category. Recurring comes from the category. For Elevation, any division with Maintenance in
+it is Maintenance, so it's recurring. Enhancement and Construction map to Enhancement and Install. Anything else
+(Irrigation, Plant Health Care, Snow, Indirect) keeps its own name and is one-time. Data Check lists those.
+
+`win_rate` is `properties` (each property once a year, so renewals and change orders don't stack up wins), `deals`
+(every record) or `off` (no tile). `exclude` keeps test data off the board: `names` are exact property or
+opportunity names, `words` are whole words in either. Excluded deals are counted and named on Data Check, and the
+SQL views flag them the same way.
+
+The New maintenance goal counts recurring work won between its window start (a goal value set on Data Check, or
+Jan 1 of the goal period) and the deadline.
 
 Deals whose Aspire rep is not on the roster stay on the board. They count in every total, show the Aspire name with a
 plain "not on roster" tag, and have their own filter on All Accounts. Aspire deals are read only in Summit: fix them in

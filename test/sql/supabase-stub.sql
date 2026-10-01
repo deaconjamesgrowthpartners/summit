@@ -5,7 +5,8 @@ do $$ begin
 end $$;
 create schema auth;
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.uid', true), '')::uuid $$;
-create table workspaces (id uuid primary key default gen_random_uuid(), slug text unique, name text, active boolean default true, tabs jsonb default '[]');
+create table workspaces (id uuid primary key default gen_random_uuid(), slug text unique, name text, active boolean default true, tabs jsonb default '[]',
+  goal_tiles jsonb default '[{"key": "newMaint", "source": "won_recurring"}, {"key": "growth", "source": "manual"}]');
 create table members (id uuid primary key default gen_random_uuid(), workspace_id uuid references workspaces(id), full_name text,
   email text, role text, team text, branch text, active boolean default true, user_id uuid);
 create table app_admins (user_id uuid, email text);

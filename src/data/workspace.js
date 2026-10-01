@@ -46,7 +46,17 @@ export function normalize(ws) {
     .map(toStage);
   const stageBy = Object.fromEntries(stages.map((s) => [s.name, s]));
   const stageByKey = Object.fromEntries(stages.map((s) => [nameKey(s.name), s]));
+  // divisions: a list of rules, "match" found anywhere in the division name. An object of exact
+  // names also works. A division nothing matches keeps its name and is one-time.
   const divisions = Object.fromEntries(Object.entries(obj(pl.divisions)).map(([k, v]) => [nameKey(k), String(v)]));
+  const divisionRules = arr(pl.divisions).map(obj).filter((r) => r.match && r.category).map((r) => ({ match: nameKey(r.match), category: String(r.category) }));
+  const ex = obj(pl.exclude);
+  const exclude = {
+    names: arr(ex.names).map(nameKey).filter(Boolean),
+    words: arr(ex.words).map((w) => String(w).trim()).filter(Boolean),
+  };
+  // win rate: properties (a property once a year), deals (every record), or off
+  const winRate = ['properties', 'deals', 'off'].includes(pl.win_rate) ? pl.win_rate : 'deals';
 
   const categories = arr(ws.categories)
     .map((c) => (typeof c === 'string' ? { name: c } : obj(c)))
@@ -88,6 +98,9 @@ export function normalize(ws) {
     stageBy,
     stageByKey,
     divisions,
+    divisionRules,
+    exclude,
+    winRate,
     categories,
     catBy,
     goalTiles,
@@ -124,6 +137,7 @@ export function goalFields(cfg) {
     add(g.goal, `${g.label} goal`, 'money');
     if (g.source === 'manual') add(g.actual, g.actual_label || `${g.label} actual`, 'money');
     add(g.as_of, 'As of', 'text');
+    add(g.start, `${g.label} window opens`, 'date');
     add(g.deadline, 'Deadline', 'date');
   }
   for (const t of cfg.tabs) if (t.ratio && t.ratio.goal) add(t.ratio.goal, `${t.ratio.label} standard`, 'number');

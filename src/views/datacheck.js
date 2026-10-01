@@ -76,23 +76,26 @@ function syncCard(cfg) {
   </div>`;
 }
 
-// every deal on the board is counted somewhere. Statuses the config does not map and divisions with no
-// Summit category are listed here with counts, so nothing drops out of the numbers unseen.
+// every deal on the board is counted somewhere. Excluded test data, statuses the config does not map and
+// divisions no rule matches are listed with counts, so nothing drops out of the numbers unseen.
 function mapCheck(cfg) {
   if (!fromCrm()) return '';
-  const all = oppsAll();
+  const all = oppsAll(), ex = S.excluded || [];
   const tally = (rows, key) => Object.entries(rows.reduce((t, o) => ((t[key(o)] = (t[key(o)] || 0) + 1), t), {})).sort((a, b) => b[1] - a[1]);
+  const total = (t) => t.reduce((a, [, n]) => a + n, 0);
   const unknown = tally(all.filter((o) => isUnknown(cfg, o)), (o) => o.status_name || 'blank');
-  const unmapped = tally(all.filter((o) => o.category && !o.category_mapped), (o) => o.category);
+  const oneTime = tally(all.filter((o) => o.category && !o.category_mapped), (o) => o.category);
   const noDivision = all.filter((o) => !o.category).length;
-  const counted = all.length - unknown.reduce((a, [, n]) => a + n, 0);
+  const exNames = tally(ex, (o) => o.account);
   return `<h3 style="font-size:13px;margin:12px 0 4px">Every deal accounted for</h3>
-    <div class="kv"><span>Deals from ${esc(cfg.crmLabel)}</span><b>${all.length}</b></div>
-    <div class="kv"><span>Counted as open, won or lost</span><b>${counted}</b></div>
-    ${unknown.length ? `<div class="kv"><span>Status not mapped: ${unknown.map(([k, n]) => `${esc(k)} ${n}`).join(', ')}</span><span class="pill y">${unknown.reduce((a, [, n]) => a + n, 0)}</span></div>
+    <div class="kv"><span>Deals from ${esc(cfg.crmLabel)}</span><b>${all.length + ex.length}</b></div>
+    ${ex.length ? `<div class="kv"><span>Left off as test data: ${exNames.slice(0, 8).map(([k, n]) => `${esc(k)}${n > 1 ? ` (${n})` : ''}`).join(', ')}${exNames.length > 8 ? `, and ${exNames.length - 8} more` : ''}</span><span class="pill n">${ex.length}</span></div>
+      <p class="help">Matched by the exclude list in the workspace's pipeline config. Not in any number on any screen.</p>` : ''}
+    <div class="kv"><span>On the board</span><b>${all.length}</b></div>
+    <div class="kv"><span>Counted as open, won or lost</span><b>${all.length - total(unknown)}</b></div>
+    ${unknown.length ? `<div class="kv"><span>Status not mapped: ${unknown.map(([k, n]) => `${esc(k)} ${n}`).join(', ')}</span><span class="pill y">${total(unknown)}</span></div>
       <p class="help">Not counted as open, won or lost until the status is added to the workspace's pipeline config.</p>` : ''}
-    ${unmapped.length ? `<div class="kv"><span>Type with no Summit category: ${unmapped.map(([k, n]) => `${esc(k)} ${n}`).join(', ')}</span><span class="pill y">${unmapped.reduce((a, [, n]) => a + n, 0)}</span></div>
-      <p class="help">Counted everywhere, but never as recurring. Map the division in the pipeline config to count it toward recurring goals and coverage.</p>` : ''}
+    ${oneTime.length ? `<div class="kv"><span>One-time, no category rule: ${oneTime.map(([k, n]) => `${esc(k)} ${n}`).join(', ')}</span><span class="pill n">${total(oneTime)}</span></div>` : ''}
     ${noDivision ? `<div class="kv"><span>No division in ${esc(cfg.crmLabel)}</span><span class="pill y">${noDivision}</span></div>` : ''}
     ${all.some((o) => o.unassigned && isOpen(cfg, o)) ? `<div class="kv"><span>Open deals with a rep not on the roster</span><span class="pill y">${all.filter((o) => o.unassigned && isOpen(cfg, o)).length}</span></div>` : ''}`;
 }

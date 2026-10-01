@@ -65,7 +65,13 @@ export const ASPIRE_PIPELINE = {
     { name: 'Delivered', status: 'won', prob: 1 },
     { name: 'Lost', status: 'lost', prob: 0 },
   ],
-  divisions: {},
+  divisions: [
+    { match: 'Maintenance', category: 'Maintenance' },
+    { match: 'Enhancement', category: 'Enhancement' },
+    { match: 'Construction', category: 'Install' },
+  ],
+  win_rate: 'properties',
+  exclude: { names: ['John Test Property', 'Test All Out Door', 'Billy Bob Residence TEST'], words: ['test', 'sample'] },
 };
 
 // the 5 test rows, same addresses and teams as migration 003
@@ -161,13 +167,15 @@ export function fixtures(now = new Date()) {
     const repName = aspireReps[(i * 7) % aspireReps.length];
     const m = members.find((x) => x.full_name === repName);
     const wonish = status === 'Won' || status === 'Delivered';
-    const division = pick(['Maintenance', 'Maintenance', 'Enhancements', 'Enhancements', 'Construction']);
-    const est = Math.round((division === 'Maintenance' ? 15000 + r() * 80000 : 3000 + r() * 45000) / 100) * 100;
+    const division = pick(['COM - Maintenance', 'RES - Maintenance', 'COM - Enhancements', 'RES - Enhancements', 'COM - Construction', 'IRR - Irrigation', 'PHC - Plant health Care', 'SNW - Snow', 'Indirect']);
+    const maint = division.includes('Maintenance');
+    const est = Math.round((maint ? 15000 + r() * 80000 : 3000 + r() * 45000) / 100) * 100;
     const wonDate = wonish ? addDays(d, -Math.round(r() * 420)) : null;
     return {
       workspace_id: WS.id, opportunity_id: 20000 + i, opportunity_number: 7000 + i,
-      opportunity_name: `${division === 'Maintenance' ? 'Annual maintenance' : pick(['Spring color', 'Irrigation repair', 'Hardscape', 'Tree work', 'Mulch'])} ${2026 - (i % 3)}`,
-      property_name: names[i % names.length] + (i >= names.length ? ` ${Math.floor(i / names.length) + 1}` : ''),
+      opportunity_name: `${maint ? 'Annual maintenance' : pick(['Spring color', 'Irrigation repair', 'Hardscape', 'Tree work', 'Mulch'])} ${2026 - (i % 3)}`,
+      // a quarter of the work repeats a property: renewals and change orders, the way Aspire logs them
+      property_name: names[i % names.length] + (i % 4 === 0 || i < names.length ? '' : ` ${Math.floor(i / names.length) + 1}`),
       sales_rep_name: repName, member_id: m ? m.id : null, member_name: m ? m.full_name : null, member_role: m?.role || null,
       member_team: m?.team || null, member_active: m ? true : null, unassigned: !m,
       branch_name: i % 41 === 5 ? null : m?.branch || pick(WS.branches), division_name: division, status_name: status || null,
@@ -179,5 +187,10 @@ export function fixtures(now = new Date()) {
       aspire_modified_at: addDays(d, -Math.round(r() * 30)) + 'T10:00:00', synced_at: now.toISOString(),
     };
   });
+  // test data Aspire carries, which the exclude list keeps off the board
+  [['John Test Property', 'Mulch install', 'Won'], ['Test All Out Door', 'Spring color', 'Bidding'], ['Billy Bob Residence TEST', 'Sod', 'Won'],
+    ['Riverside HOA', 'Sample estimate', 'Approved']].forEach(([prop, opp, status], i) => pipeline.push({
+    ...pipeline[i], opportunity_id: 29000 + i, opportunity_number: 9900 + i, property_name: prop, opportunity_name: opp, status_name: status,
+    won_dollars: status === 'Won' ? 99000 : null, won_date: status === 'Won' ? d : null, division_name: 'RES - Maintenance' }));
   return { workspaces: [WS], members, opps, commits, goals, accounts, sync, pipeline };
 }

@@ -5,7 +5,7 @@ import { writeOpp, writeCommit, writeGoal, writeAccount, addOpp, acceptLate, onS
 import { $, toast, num, addDays } from './lib/format.js';
 import { applyBrand } from './lib/theme.js';
 import { stageOf, parseCrm, isWon } from './lib/rules.js';
-import { fromAspire } from './data/pipeline.js';
+import { fromAspire, isExcluded } from './data/pipeline.js';
 import { renderHeader } from './views/header.js';
 import { renderSummit } from './views/summit.js';
 import { renderClimb } from './views/climb.js';
@@ -82,7 +82,7 @@ async function boot() {
 function teardown() {
   if (unsub) unsub();
   unsub = null;
-  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, commits: {}, accounts: {}, goalsRow: null, filters: {}, sort: {}, crm: null, sync: null, syncing: false });
+  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, commits: {}, accounts: {}, goalsRow: null, filters: {}, sort: {}, crm: null, sync: null, syncing: false, excluded: [] });
   applyBrand({});
 }
 
@@ -111,8 +111,14 @@ async function start() {
 }
 
 // the board's deals: Summit's opps table, or the Aspire view turned into the same shape
+// test and sample data from the CRM stays off the board, held in S.excluded so Data Check can count it
 function setDeals(data) {
-  const rows = S.cfg.pipelineSource === 'aspire' ? (data.pipeline || []).map((r) => fromAspire(S.cfg, r)) : data.opps || [];
+  let rows = data.opps || [];
+  S.excluded = [];
+  if (S.cfg.pipelineSource === 'aspire') {
+    rows = [];
+    for (const r of data.pipeline || []) (isExcluded(S.cfg, r) ? S.excluded : rows).push(fromAspire(S.cfg, r));
+  }
   S.opps = Object.fromEntries(rows.map((o) => [o.id, o]));
 }
 

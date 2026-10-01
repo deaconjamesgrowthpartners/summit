@@ -3,15 +3,10 @@ import { repCell } from './grid.js';
 import { bookTile } from './book.js';
 import { esc, money, pct, fmtDate, addDays, dow, daysBetween, validDate } from '../lib/format.js';
 import { mLabel } from '../data/workspace.js';
-import { isOpen, isWon, isLost, isUnknown, isRecurring, weighted, bidOut, sum, ryg, autoDid, didValue, comValue, flag, rowIssues } from '../lib/rules.js';
+import { isOpen, isWon, isLost, isUnknown, isRecurring, weighted, bidOut, sum, ryg, autoDid, didValue, comValue, flag, rowIssues, goalActual, winRateOf } from '../lib/rules.js';
 
 const tile = (cls, l, v, s, extra = '') =>
   `<div class="tile ${cls}"><span class="stripe"></span><div class="l">${l}</div><div class="v">${v}</div>${extra}${s ? `<div class="s">${s}</div>` : ''}</div>`;
-
-// actual for a goal tile, from the board or typed in by leadership
-function tileActual(cfg, t, won, g) {
-  return t.source === 'won_recurring' ? sum(won.filter((o) => isRecurring(cfg, o))) : +g[t.actual] || 0;
-}
 
 export function renderSummit(el) {
   const cfg = S.cfg, w = wk(), g = goals(), company = isCompany();
@@ -26,12 +21,13 @@ export function renderSummit(el) {
   const unknown = rows.filter((o) => isUnknown(cfg, o));
   const unassignedOpen = open.filter((o) => o.unassigned);
   const recurring = won.filter((o) => isRecurring(cfg, o));
-  const winRate = won.length + lost.length ? Math.round((won.length / (won.length + lost.length)) * 100) : 0;
+  const wr = winRateOf(cfg, won, lost);
+  const winRate = wr && wr.w + wr.l ? Math.round((wr.w / (wr.w + wr.l)) * 100) : 0;
   const bids = open.filter((o) => bidOut(cfg, o));
 
   // goal tiles
   const gt = cfg.goalTiles.map((t) => {
-    const actual = tileActual(cfg, t, won, g);
+    const actual = goalActual(cfg, t, g, rows, won, S.goalsRow?.period || yr);
     const goal = +g[t.goal] || 0;
     const deadline = t.deadline ? g[t.deadline] : null;
     const daysLeft = validDate(deadline) ? Math.max(0, daysBetween(w.today, deadline)) : null;
@@ -117,7 +113,7 @@ export function renderSummit(el) {
     ${cfg.summitTiles.map((t) => bookTile(t, accountsScoped(), w.today)).join('')}
     ${tile('', 'Open pipeline', money(sum(open)), `${open.length} opportunities · ${money(sum(open, (o) => weighted(cfg, o)))} weighted`)}
     ${covHtml}
-    ${tile('', 'Win rate', `${winRate}%`, `${won.length} won · ${lost.length} lost${crm ? ` in ${yr}` : ''}`)}
+    ${wr ? tile('', wr.unit ? 'Win rate by property' : 'Win rate', `${winRate}%`, `${wr.w} won · ${wr.l} lost${wr.unit ? ' properties' : ''}${crm ? ` in ${yr}` : ''}`) : ''}
   </div>
 
   <div class="split sec">
