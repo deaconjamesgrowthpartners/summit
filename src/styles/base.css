@@ -190,3 +190,6 @@ td button.cellbtn.on b{text-decoration:underline}
 .months span{background:var(--surface2);border-radius:8px;padding:4px 9px;font-size:12.5px}
 .months span b{font-variant-numeric:tabular-nums}
 .tgt td input{width:100px}
+/* a section the period toggle does not drive says so, up front */
+.sec.fixed .sec-h h2 .pill{margin-left:8px;vertical-align:middle;font-size:11px}
+.fixed-why{font-size:13px;color:var(--ink2);margin:-4px 0 10px}

@@ -200,7 +200,11 @@ the month by days. A company row wins over the branches for that month. No targe
 "no target set", never a percentage of zero.
 
 The Climb has the same toggle, default Week. Month, Quarter and Year add up the lock weeks that end inside them.
-Goals (New maintenance and the rest) keep their own windows; the toggle does not move them.
+Two sections ignore the toggle, and say so in their headers:
+- Cash ladder: work starting by week, the next 8 weeks from this Monday. Signed is firm, open is weighted by status.
+  The Maintenance / Install and Enhancement / Net New filters apply; the period does not.
+- Goals: New maintenance and the rest count over the goal window (start to deadline, set on Data Check). Each goal tile
+  shows its window. The book tiles are the book as it stands today.
 
 ## Aspire probe (discovery only)
 

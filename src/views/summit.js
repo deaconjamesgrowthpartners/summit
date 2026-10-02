@@ -4,9 +4,9 @@ import { repLines } from './team.js';
 import { repScore } from './climb.js';
 import { bookTile } from './book.js';
 import { seg, periodSeg } from './controls.js';
-import { esc, money, pct, fmtDate, daysBetween, validDate } from '../lib/format.js';
+import { esc, money, pct, fmtDate, daysBetween, validDate, addDays, dow } from '../lib/format.js';
 import { mLabel } from '../data/workspace.js';
-import { isOpen, isUnknown, isRecurring, weighted, sum, ryg, goalDetail, netNewTest, isBidMeasure, bidNote } from '../lib/rules.js';
+import { isOpen, isWon, isUnknown, isRecurring, weighted, bidOut, sum, ryg, goalDetail, netNewTest, isBidMeasure, bidNote } from '../lib/rules.js';
 import { periodRange, weeksIn, monthsIn, monthLabel, targetFor } from '../lib/period.js';
 import { METRICS, metricRows, metricValue, filterDeals, split, renewalsIn, forecastByMonth, branchGroups, repBreakdown } from '../lib/summit.js';
 
@@ -57,7 +57,7 @@ export function renderSummit(el) {
       `<div class="split3"><span>${crSplit.open.n} open ${money(crSplit.open.value)}</span><span>${crSplit.won.n} won ${money(crSplit.won.value)}</span><span>${crSplit.lost.n} lost ${money(crSplit.lost.value)}</span>${crSplit.other.n ? `<span>${crSplit.other.n} status not mapped</span>` : ''}</div>`, attrs('created')),
     tile(`${fcT.cls} click ${onDrill('forecast')}`, 'Forecast', fcT.v,
       `${fcT.s} · won, starting by ${fmtDate(p.end)} · ${money(sum(unstarted))} won and not started in all${wonNoStart.length ? ` · ${wonNoStart.length} won this year with no start date` : ''}`, '', attrs('forecast')),
-    tile('off', 'Earned revenue', 'Not connected yet', `Needs ${esc(cfg.crmLabel)} invoices synced. Not $0, just not here yet.`),
+    tile('off', 'Earned revenue', 'Not connected yet', `Needs the ${esc(cfg.crmLabel)} Invoices sync, a separate piece of work. Not $0, just not here yet.`),
     crm ? tile('off', 'Pipeline advanced', since ? `Tracking since ${fmtDate(since)}` : 'Starts with the next sync',
       `${esc(cfg.crmLabel)} keeps no stage history. Summit records every deal's status nightly, so this counts from ${since ? fmtDate(since) : 'the first snapshot'} forward.`) : '',
   ].join('');
@@ -95,6 +95,22 @@ export function renderSummit(el) {
       ${renderGrid([...rows].sort((a, b) => (+b.value || 0) - (+a.value || 0)), { canEdit: canEditOpp, full: true })}</div>`;
   }
 
+  // cash ladder: work starting by week, 8 weeks from this Monday. Signed work is firm, open work is
+  // weighted by status. It always looks 8 weeks ahead; the period toggle does not move it, the filters do.
+  const mon = addDays(w.today, -((dow(w.today) + 6) % 7));
+  const buckets = [];
+  for (let i = 0; i < 8; i++) { const s0 = addDays(mon, i * 7); buckets.push({ s: s0, e: addDays(s0, 6), firm: 0, soft: 0 }); }
+  R.forEach((o) => {
+    if (!validDate(o.start_date)) return;
+    const b = buckets.find((x) => o.start_date >= x.s && o.start_date <= x.e);
+    if (!b) return;
+    if (isWon(cfg, o)) b.firm += +o.value || 0;
+    else if (isOpen(cfg, o)) b.soft += weighted(cfg, o);
+  });
+  const maxB = Math.max(1, ...buckets.map((b) => b.firm + b.soft));
+  const next4 = sum(buckets.slice(0, 4), (b) => b.firm), next4s = sum(buckets.slice(0, 4), (b) => b.soft);
+  const noStart = R.filter((o) => bidOut(cfg, o) && !validDate(o.start_date));
+
   // goals run on their own windows. The toggle does not move them.
   const g = goals(), yr = String(w.year);
   const goalHtml = company ? cfg.goalTiles.map((t) => {
@@ -105,7 +121,7 @@ export function renderSummit(el) {
     if (deadline) {
       const raw = pct(det.actual, goal), pc = Math.min(100, raw);
       const goalTile = tile(pc >= 100 ? 'g' : pc >= 70 ? 'y' : 'r', `${esc(t.label)} vs ${fmtDate(deadline)}`, `${money(det.actual)} <small>/ ${money(goal)}</small>`,
-        `${raw}%${daysLeft != null ? ` · ${daysLeft} days left` : ''}${basis}`, `<div class="prog"><i style="width:${pc}%"></i></div>`);
+        `${raw}%${daysLeft != null ? ` · ${daysLeft} days left` : ''}${basis}${det.start ? ` · window ${fmtDate(det.start)} to ${fmtDate(deadline)}` : ''}`, `<div class="prog"><i style="width:${pc}%"></i></div>`);
       if (!t.coverage || t.source !== 'won_recurring') return goalTile;
       const gap = Math.max(0, goal - det.actual);
       const pipe = oppsScoped().filter((o) => isOpen(cfg, o) && isRecurring(cfg, o) && (!det.isNew || det.isNew(o)));
@@ -136,6 +152,7 @@ export function renderSummit(el) {
     <span class="when">${esc(p.label)} · ${fmtDate(p.start)} to ${fmtDate(p.end)}</span>
   </div>
   <div class="tiles">${tilesHtml}</div>
+  ${(S.targets || []).length ? '' : `<p class="note"><b>No targets yet.</b> Every tile says "no target set" until leadership enters them on Data Check: All, Maintenance and Install, by branch, by month.</p>`}
   <p class="note">Click a tile or a branch number for the deals behind it. Net New: the property had no won deal, in any division, before this one. Everything else is Enhancement. Install is everything that is not maintenance.</p>
 
   <div class="sec card">
@@ -149,6 +166,15 @@ export function renderSummit(el) {
   </div>
 
   ${drillHtml}
+
+  <div class="sec card fixed">
+    <div class="sec-h"><h2 class="s16">Cash ladder · work starting by week <span class="pill n">next 8 weeks, not the toggle</span></h2><span class="sub">Next 4 weeks: <b>${money(next4)}</b> firm, ${money(next4s)} weighted</span></div>
+    <p class="fixed-why">Always the next 8 weeks from this Monday, whatever period is picked. The Maintenance / Install and Enhancement / Net New filters do apply.</p>
+    <div class="ladder">${buckets.map((b) => `<div class="col"><span class="lab">${b.firm + b.soft ? money(b.firm + b.soft) : ''}</span><div class="soft" style="height:${Math.round((b.soft / maxB) * 100)}%"></div><div class="firm" style="height:${Math.round((b.firm / maxB) * 100)}%"></div></div>`).join('')}</div>
+    <div class="ladder-x">${buckets.map((b) => `<span>${fmtDate(b.s)}</span>`).join('')}</div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>Signed, starting that week</span><span><i style="background:var(--grey)"></i>Open, weighted by status</span></div>
+    ${noStart.length ? `<div class="note">${noStart.length} bids out worth ${money(sum(noStart))} have no start date, so they're invisible here. They're on the Data Check tab.</div>` : ''}
+  </div>
 
   <div class="split sec">
     <div class="card">
@@ -168,7 +194,9 @@ export function renderSummit(el) {
     </div>
   </div>
 
-  ${goalHtml || bookHtml ? `<div class="sec"><div class="sec-h"><h2 class="s16">Goals</h2><span class="sub">Each goal runs on its own window. The toggle does not move these.</span></div><div class="tiles">${goalHtml}${bookHtml}</div></div>` : ''}
+  ${goalHtml || bookHtml ? `<div class="sec fixed"><div class="sec-h"><h2 class="s16">Goals <span class="pill n">goal window, not the toggle</span></h2><span class="sub">The toggle and filters above do not change these.</span></div>
+    <p class="fixed-why">Each goal counts from its window start to its deadline, set by leadership on Data Check. The book tiles are the book as it stands today.</p>
+    <div class="tiles">${goalHtml}${bookHtml}</div></div>` : ''}
 
   <div class="sec">
     <div class="sec-h"><h2 class="s16">${kind === 'week' ? esc(w.scoreLabel) : esc(p.label)} · committed vs did, ${esc(scopeLabel())}</h2><span class="sub">${weeks.length ? `${weeks.length === 1 ? `Week ending ${fmtDate(weeks[0])}` : `${weeks.length} lock weeks, ending ${fmtDate(weeks[0])} to ${fmtDate(weeks[weeks.length - 1])}`}` : `No week has ended in ${esc(p.label)} yet`}. Detail on The Climb.</span></div>
