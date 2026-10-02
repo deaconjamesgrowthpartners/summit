@@ -19,6 +19,8 @@ export const S = {
   crm: null,          // pasted CRM export, id -> { status, value }
   sync: null,         // Aspire sync: { runs, unmatched }. null when the workspace has none
   excluded: [],       // CRM deals the workspace's exclude list keeps off the board (test data)
+  targets: [],        // Summit tile targets, migration 011
+  tracking: null,     // the first status snapshot day: "pipeline advanced" is measurable from here
   syncing: false,
   live: 'connecting',
 };

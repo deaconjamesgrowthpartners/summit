@@ -192,3 +192,20 @@ export function writeGoal(k, v) {
     rerender();
   }), 350);
 }
+
+// a Summit target. Saved straight away, one row per cell. Blank removes it.
+const sameTarget = (a, b) => ['branch', 'month', 'metric', 'division', 'kind'].every((k) => a[k] === b[k]);
+export function writeTarget(key, amount) {
+  const prev = S.targets.find((t) => sameTarget(t, key));
+  S.targets = [...S.targets.filter((t) => !sameTarget(t, key)), ...(amount === null ? [] : [{ ...key, amount }])];
+  chain(`t:${Object.values(key).join('|')}`, async () => {
+    try {
+      await S.api.saveTarget(key, amount);
+      toast('Saved');
+    } catch (e) {
+      S.targets = [...S.targets.filter((t) => !sameTarget(t, key)), ...(prev ? [prev] : [])];
+      toast(explain(e));
+    }
+    rerender();
+  });
+}

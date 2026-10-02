@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalize } from '../src/data/workspace.js';
 import { fromAspire, categoryFor, isExcluded } from '../src/data/pipeline.js';
-import { isOpen, isWon, isLost, isUnknown, weighted, sum, rowIssues, flag, autoDid, goalActual, goalDetail, winRateOf, newPropertyTest } from '../src/lib/rules.js';
+import { isOpen, isWon, isLost, isUnknown, weighted, sum, rowIssues, flag, autoDid, goalActual, goalDetail, winRateOf, newPropertyTest, bidsIn, netNewTest, divisionOf, autoDidRows } from '../src/lib/rules.js';
 
 const PIPELINE = {
   source: 'aspire',
@@ -95,14 +95,21 @@ test('a workspace without a pipeline block keeps its typed stages', () => {
   assert.ok(isOpen(typed, { stage: 'whatever' }), 'typed rows keep the old default');
 });
 
-test('auto-filled commits: won and starts come from Aspire; bids do not, because Aspire has no bid date', () => {
+test('auto-filled commits from Aspire: won, starts, and bids counted from every opportunity created that week', () => {
   const c = normalize({ id: 'w', pipeline: PIPELINE, categories: [], tabs: [], measures: [
-    { key: 'bidsN', auto: 'bids_count' }, { key: 'wonD', type: 'money', auto: 'won_value' }, { key: 'startsD', type: 'money', auto: 'starts_next_week_value' }] });
-  const won = fromAspire(c, row({ status_name: 'Won', won_dollars: 800, won_date: '2026-09-24', start_date: '2026-10-01' }));
-  const a = autoDid(c, [{ ...won, owner_member_id: 'm1' }], 'm1', '2026-09-29');
+    { key: 'bidsN', auto: 'bids_count' }, { key: 'bidsD', type: 'money', auto: 'bids_value' }, { key: 'wonD', type: 'money', auto: 'won_value' }, { key: 'startsD', type: 'money', auto: 'starts_next_week_value' }] });
+  const won = fromAspire(c, row({ status_name: 'Won', estimated_dollars: 900, won_dollars: 800, won_date: '2026-09-24', start_date: '2026-10-01', created_date: '2026-09-23' }));
+  const open = fromAspire(c, row({ opportunity_id: 2, status_name: 'Bidding', estimated_dollars: 500, created_date: '2026-09-29' }));
+  const lost = fromAspire(c, row({ opportunity_id: 3, status_name: 'Lost', estimated_dollars: 300, created_date: '2026-09-25', lost_date: '2026-09-27' }));
+  const old = fromAspire(c, row({ opportunity_id: 4, status_name: 'Bidding', estimated_dollars: 700, created_date: '2026-09-22' }));
+  const a = autoDid(c, [won, open, lost, old].map((o) => ({ ...o, owner_member_id: 'm1' })), 'm1', '2026-09-29');
   assert.equal(a.wonD, 800);
   assert.equal(a.startsD, 800);
-  assert.equal('bidsN' in a, false, 'left for the rep to type');
+  assert.equal(a.bidsN, 3, 'won, open and lost all count; Sept 22 is the week before');
+  assert.equal(a.bidsD, 900 + 500 + 300, 'bid dollars are the estimate, even on won work');
+  const b = bidsIn(c, [won, open, lost], '2026-09-23', '2026-09-29');
+  assert.deepEqual([b.open.n, b.won.n, b.lost.n], [1, 1, 1]);
+  assert.equal(autoDid(c, [fromAspire(c, row({ created_date: null }))], 'm1', '2026-09-29').bidsN, 0, 'no created date, before migration 011: zero, not a crash');
 });
 
 // migration 009's rules

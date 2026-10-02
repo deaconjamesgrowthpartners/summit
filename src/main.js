@@ -1,7 +1,7 @@
 import './styles/base.css';
 import { S, wk, ckey, isLeader, memberById, pickGoals, tabFor } from './data/store.js';
 import { normalize } from './data/workspace.js';
-import { writeOpp, writeCommit, writeGoal, writeAccount, addOpp, acceptLate, onSaved } from './data/writes.js';
+import { writeOpp, writeCommit, writeGoal, writeAccount, writeTarget, addOpp, acceptLate, onSaved } from './data/writes.js';
 import { $, toast, num, addDays } from './lib/format.js';
 import { applyBrand } from './lib/theme.js';
 import { stageOf, parseCrm, isWon } from './lib/rules.js';
@@ -76,13 +76,15 @@ async function boot() {
   });
   const s = await api.session();
   S.user = s?.user || null;
+  // a dashboard invite or an emailed link that did not sign anyone in: say so, and offer the code
+  if (!S.user && api.linkError) login = { step: 'email', email: '', err: api.linkError === 'expired' ? 'That link has expired. Type your email and we will send a code.' : 'That link did not sign you in. Type your email and we will send a code.' };
   if (S.user) start(); else showLogin();
 }
 
 function teardown() {
   if (unsub) unsub();
   unsub = null;
-  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, commits: {}, accounts: {}, goalsRow: null, filters: {}, sort: {}, crm: null, sync: null, syncing: false, excluded: [] });
+  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, commits: {}, accounts: {}, goalsRow: null, filters: {}, sort: {}, crm: null, sync: null, syncing: false, excluded: [], targets: [], tracking: null });
   applyBrand({});
 }
 
@@ -97,18 +99,23 @@ async function start() {
   started = true;
   try {
     app.innerHTML = '<div class="gate"><div class="card empty">Loading</div></div>';
+    // a login made outside the app (a dashboard invite) is tied to its roster row here, by email
+    await api.linkMember().catch(() => 0);
     S.admin = await api.isAdmin(S.user.id).catch(() => false);
     workspaces = await api.workspaces().catch(() => []);
     const slug = slugFromPath();
     if (!slug) {
       if (workspaces.length === 1) { history.replaceState(null, '', `/${workspaces[0].slug}`); return openWorkspace(workspaces[0].slug); }
-      return renderGate(app, workspaces.length ? { title: 'Pick a workspace', list: workspaces } : { title: 'Nothing here', body: 'This account is not on a roster yet.' });
+      return renderGate(app, workspaces.length ? { title: 'Pick a workspace', list: workspaces } : { title: 'Nothing here', body: `Signed in as ${S.user.email || 'this account'}, which is not on a roster yet.` });
     }
     return openWorkspace(slug);
   } finally {
     starting = false;
   }
 }
+
+// commits back to Jan 1, so The Climb and Summit can add up a month, a quarter or the year
+const commitsSince = (w) => { const y = `${w.year}-01-01`, k = addDays(w.prevKey, -77); return y < k ? y : k; };
 
 // the board's deals: Summit's opps table, or the Aspire view turned into the same shape
 // test and sample data from the CRM stays off the board, held in S.excluded so Data Check can count it
@@ -131,15 +138,17 @@ async function openWorkspace(slug) {
   applyBrand(S.cfg.brand);
   document.title = `Summit · ${S.cfg.name}`;
   const w = wk();
-  const data = await api.load(S.cfg.id, addDays(w.prevKey, -77), S.cfg.pipelineSource);
+  const data = await api.load(S.cfg.id, commitsSince(w), S.cfg.pipelineSource);
   S.members = data.members;
   S.me = data.members.find((m) => m.user_id === S.user.id && m.active) || null;
-  if (!S.me && !S.admin) { teardown(); return renderGate(app, { title: 'Nothing here', body: 'Check the link, or sign in with the email your team uses.' }); }
+  if (!S.me && !S.admin) { teardown(); return renderGate(app, { title: 'Nothing here', body: `Signed in as ${S.user.email || 'this account'}. Check the link, or sign in with the email your team uses.` }); }
   setDeals(data);
   S.commits = Object.fromEntries(data.commits.map((c) => [ckey(c.member_id, c.week_key), c]));
   S.accounts = Object.fromEntries((data.accounts || []).map((a) => [a.id, a]));
   S.goalsRow = pickGoals(data.goals, w.year);
   S.sync = data.sync || null;
+  S.targets = data.targets || [];
+  S.tracking = data.tracking || null;
   S.scope = 'company';
   try { const sc = localStorage.getItem(`summit.scope.${S.cfg.id}`); if (sc) S.scope = sc; } catch { /* private mode */ }
   const want = tabFromUrl();
@@ -173,13 +182,15 @@ async function syncNow(full) {
 async function refresh() {
   if (!S.cfg) return;
   try {
-    const data = await api.load(S.cfg.id, addDays(wk().prevKey, -77), S.cfg.pipelineSource);
+    const data = await api.load(S.cfg.id, commitsSince(wk()), S.cfg.pipelineSource);
     S.members = data.members;
     setDeals(data);
     S.commits = Object.fromEntries(data.commits.map((c) => [ckey(c.member_id, c.week_key), c]));
     S.accounts = Object.fromEntries((data.accounts || []).map((a) => [a.id, a]));
     S.goalsRow = pickGoals(data.goals, wk().year) || S.goalsRow;
     S.sync = data.sync || S.sync;
+    S.targets = data.targets || S.targets;
+    S.tracking = data.tracking || S.tracking;
     renderSoon();
   } catch { /* try again next time */ }
 }
@@ -256,6 +267,12 @@ document.addEventListener('change', (e) => {
   }
   if (t.matches('[data-ws]')) { location.href = `/${encodeURIComponent(t.value)}`; return; }
   if (t.dataset.f) { S.filters[t.dataset.f] = t.value; return renderAll(); }
+  if (t.dataset.tgt) {
+    const [branch, month, metric, division] = t.dataset.tgt.split('|');
+    const v = num(t.value);
+    writeTarget({ workspace_id: S.cfg.id, branch, month, metric, division, kind: 'all' }, v === '' ? null : v);
+    return renderSoon();
+  }
   if (t.dataset.g) {
     const v = t.dataset.gt === 'num' ? num(t.value) : t.value;
     writeGoal(t.dataset.g, v === '' ? null : v);
@@ -316,6 +333,16 @@ document.addEventListener('click', async (e) => {
     try { await api.sendCode(login.email, location.origin + location.pathname); toast('New code sent'); } catch { toast('Wait a minute, then try again'); }
     return;
   }
+  // the Week / Month / Quarter / Year toggle and the Summit filters: data-seg="<filter key>:<value>"
+  const seg = t.closest('[data-seg]');
+  if (seg) { const i = seg.dataset.seg.indexOf(':'); S.filters[seg.dataset.seg.slice(0, i)] = seg.dataset.seg.slice(i + 1); return renderAll(); }
+  const dr = t.closest('[data-drill]');
+  if (dr) {
+    S.filters.sum_drill = S.filters.sum_drill === dr.dataset.drill ? '' : dr.dataset.drill;
+    renderAll();
+    if (S.filters.sum_drill) document.getElementById('drill')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
   const tab = t.closest('.tab[data-v]');
   if (tab) return setView(tab.dataset.v);
   const tog = t.closest('[data-toggle]');
@@ -357,6 +384,8 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.classList?.contains('ed') && e.target.tagName === 'INPUT' && e.target.type !== 'search') e.target.blur();
+  // a Summit tile is a div with role=button: Enter and Space open its deals, the same as a click
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('div[data-drill]')) { e.preventDefault(); e.target.click(); }
 });
 
 boot();

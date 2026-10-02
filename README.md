@@ -35,13 +35,21 @@ Env (optional, the publishable key and URL are the defaults):
      by property, the test-data exclude list, and the goal window start for New maintenance.
    - `010_new_maintenance_basis.sql`: `new_maintenance_basis` (new properties or all recurring), and Aspire's
      PropertyID on `aspire_pipeline`.
+   - `011_summit_rebuild.sql`: created, end and renewal dates on `aspire_pipeline`, the `summit_targets` table,
+     the nightly status snapshot (`aspire_status_snapshots`), and `summit_link_member()`, which ties a login to its
+     roster row by email. See "The Summit tab" below.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
 3. Dashboard > Authentication > Email templates > Magic Link: include both
    `{{ .Token }}` (the 6-digit code) and `{{ .ConfirmationURL }}` (the link).
-4. Dashboard > Authentication > URL configuration: add the Netlify site URL,
-   `https://summit.deaconjames.com/**`, and `https://deploy-preview-*--<netlify-site>.netlify.app/**`.
+4. Dashboard > Authentication > URL configuration:
+   - Site URL: `https://summit.deaconjames.com`. Invites and emailed links land here.
+   - Redirect URLs: `https://summit.deaconjames.com/**`, `https://dj-summit.netlify.app/**` and
+     `https://deploy-preview-*--dj-summit.netlify.app/**`, so the previews keep working until DNS is live.
+   The app signs people in with the PKCE flow. A dashboard invite comes back with the session in the URL hash,
+   which PKCE refuses, so the app takes it by hand, then ties the login to its roster row by email
+   (`summit_link_member()`). The email-and-code sign-in is still the main door.
 5. Dashboard > Authentication > Providers > Email: leave signups on. The hook does the gating.
    Set up custom SMTP before go-live. The built-in sender caps at a few emails an hour.
 
@@ -156,10 +164,43 @@ Once the goal is met, the tile says "Goal met" and shows the pipeline still open
 
 Deals whose Aspire rep is not on the roster stay on the board. They count in every total, show the Aspire name with a
 plain "not on roster" tag, and have their own filter on All Accounts. Aspire deals are read only in Summit: fix them in
-Aspire and the nightly sync brings the change. Aspire has no bid-sent date, so the bid measures are typed by the rep
-rather than filled from the board. Signed and win rate count work won (and lost) this calendar year.
+Aspire and the nightly sync brings the change. Aspire has no bid-sent date, so a bid is any Aspire opportunity created
+that week, whatever its status now, at its estimate. A typed number still overrides it. The bid tiles say so.
+
+On Grow and Net New, deals whose rep is not on the roster get a row under their branch, with the Aspire names and
+their open dollars under the branch name. Typed measures (site audits) read — on those rows.
 
 Run the demo this way with `?pipeline=aspire`.
+
+## The Summit tab
+
+A Week / Month / Quarter / Year toggle (default Month) and two filters drive the top of the page. Week is the lock
+week, Wednesday to Tuesday, the same week The Climb and the commit lock use. The others are calendar periods.
+
+- Maintenance / Install: Maintenance is the recurring division. Install is everything else.
+- Enhancement / Net New: a deal is net new when its property had no won deal, in any division, before it (before its
+  won date if won, before it was created otherwise). Everything else is Enhancement.
+
+Tiles, each against its target:
+- Closed contracts: won dollars, by won date.
+- Pipeline created: every deal created in the period, whatever its status now, at its estimate. Split open / won / lost.
+- Forecast: won work not started yet, starting by the end of the period. Unearned revenue.
+- Earned revenue: "not connected yet" until Aspire invoices are synced.
+- Pipeline advanced: not counted. Aspire keeps no stage history, so the sync now snapshots every deal's status each night;
+  the tile says the date tracking started.
+
+Under the tiles: every branch side by side, with a "not on roster" row per branch carrying the Aspire names, so the
+rows add up to the tiles. Click a tile or a branch number for the deals behind it. Then renewals in the period
+(RenewalDate, EndDate where there is none, each row tagged with the date it used) and the forecast by start month.
+
+Targets live in `summit_targets`: workspace, branch ('' for the company), month, metric, division, kind. Leaders edit
+them on Data Check, one month and one tile at a time, for All, Maintenance and Install. The table can hold Enhancement
+and Net New targets too; the editor does not ask for them. Quarter and Year add up the months. Week takes its share of
+the month by days. A company row wins over the branches for that month. No target: the tile shows the actual and says
+"no target set", never a percentage of zero.
+
+The Climb has the same toggle, default Week. Month, Quarter and Year add up the lock weeks that end inside them.
+Goals (New maintenance and the rest) keep their own windows; the toggle does not move them.
 
 ## Aspire probe (discovery only)
 

@@ -17,6 +17,8 @@ export function isRecurring(cfg, o) {
   const c = cfg.catBy[o.category];
   return c ? c.recurring : !!o.recurring;
 }
+// the day a deal was created: Aspire's CreatedDateTime, or when it was typed into Summit
+export const createdOf = (o) => o.created_date || (typeof o.created_at === 'string' && validDate(o.created_at.slice(0, 10)) ? o.created_at.slice(0, 10) : null);
 export const sum = (arr, f = (o) => +o.value || 0) => arr.reduce((a, o) => a + f(o), 0);
 
 // green 100%+, yellow 70 to 99, red under 70
@@ -26,27 +28,42 @@ export function ryg(did, com) {
   return p >= 1 ? 'g' : p >= 0.7 ? 'y' : 'r';
 }
 
-// what the board says a person did in a week, for measures marked auto
-export function autoDid(cfg, opps, memberId, key) {
+// bids from Aspire: every opportunity created in the range, whatever its status now. A bid that won
+// in nine days still counts as a bid that week. Split open / won / lost so the tile can say so.
+export function bidsIn(cfg, rows, start, end) {
+  const B = rows.filter((o) => { const d = createdOf(o); return !!d && d >= start && d <= end; });
+  const est = (o) => +(o.estimated ?? o.value) || 0;
+  const part = (f) => { const x = B.filter(f); return { n: x.length, value: sum(x, est) }; };
+  return { n: B.length, value: sum(B, est), rows: B, open: part((o) => isOpen(cfg, o)), won: part((o) => isWon(cfg, o)), lost: part((o) => isLost(cfg, o)) };
+}
+
+// what the board says a set of deals did in a week, for measures marked auto
+export function autoDidRows(cfg, rows, key) {
   const start = addDays(key, -6), end = key, nextStart = addDays(key, 1), nextEnd = addDays(key, 7);
   const inWeek = (d) => validDate(d) && d >= start && d <= end;
-  const rows = opps.filter((o) => o.owner_member_id === memberId);
-  const bids = rows.filter((o) => { const s = stageOf(cfg, o); return s.bid && !s.hold && s.status !== 'lost' && inWeek(o.bid_date); });
   const won = rows.filter((o) => isWon(cfg, o) && inWeek(o.actual_close || o.stage_date));
   const starts = rows.filter((o) => isWon(cfg, o) && validDate(o.start_date) && o.start_date >= nextStart && o.start_date <= nextEnd);
-  const src = {
-    bids_count: bids.length,
-    bids_value: sum(bids),
-    won_value: sum(won),
-    starts_next_week_value: sum(starts),
-  };
-  // Aspire sends no bid-sent date, so bids cannot come from the board there. Reps type them,
-  // instead of the board claiming a zero.
-  if (cfg.pipelineSource === 'aspire') { delete src.bids_count; delete src.bids_value; }
+  let bidsN, bidsV;
+  if (cfg.pipelineSource === 'aspire') {
+    // Aspire sends no bid-sent date. A bid is any opportunity created that week.
+    const b = bidsIn(cfg, rows, start, end);
+    bidsN = b.n; bidsV = b.value;
+  } else {
+    const bids = rows.filter((o) => { const s = stageOf(cfg, o); return s.bid && !s.hold && s.status !== 'lost' && inWeek(o.bid_date); });
+    bidsN = bids.length; bidsV = sum(bids);
+  }
+  const src = { bids_count: bidsN, bids_value: bidsV, won_value: sum(won), starts_next_week_value: sum(starts) };
   const out = {};
   for (const m of cfg.measures) if (m.auto && m.auto in src) out[m.key] = src[m.auto];
   return out;
 }
+export const autoDid = (cfg, opps, memberId, key) => autoDidRows(cfg, opps.filter((o) => o.owner_member_id === memberId), key);
+
+// where an auto number comes from, said on the screen. Bids from Aspire read differently than the
+// typed bids reps are used to, so the tile says where they come from.
+export const isBidMeasure = (m) => m.auto === 'bids_count' || m.auto === 'bids_value';
+export const autoSource = (cfg, m) => (cfg.pipelineSource === 'aspire' && isBidMeasure(m) ? `from ${cfg.crmLabel}` : 'from board');
+export const bidNote = (cfg) => `Bids count every ${cfg.crmLabel} opportunity created that week, open, won or lost. Not typed. A typed number still overrides.`;
 
 // a goal tile's window: from its start (Jan 1 of the goal period if unset) to its deadline
 export function goalWindow(t, g, period) {
@@ -94,6 +111,27 @@ export function goalDetail(cfg, t, g, rows, wonThisYear, period, history = rows)
   };
 }
 export const goalActual = (...a) => goalDetail(...a).actual;
+
+// Maintenance or Install: maintenance is the recurring work, install is everything else
+export const divisionOf = (cfg, o) => (isRecurring(cfg, o) ? 'maintenance' : 'install');
+
+// Enhancement or Net New, for every division. A deal is net new when its property had no won deal,
+// in any division, before this one: before its won date when won, before it was created otherwise.
+// A won deal with no won date counts as history from the start. History is every deal the workspace
+// holds, whatever the screen's scope.
+export function netNewTest(cfg, history) {
+  const won = new Map();
+  for (const o of history) {
+    if (!isWon(cfg, o)) continue;
+    const k = propertyKey(o);
+    if (!won.has(k)) won.set(k, []);
+    won.get(k).push({ id: o.id, d: validDate(o.actual_close) ? o.actual_close : '0000-00-00' });
+  }
+  return (o) => {
+    const ref = isWon(cfg, o) ? (validDate(o.actual_close) ? o.actual_close : '0000-00-00') : (createdOf(o) || '9999-12-31');
+    return !(won.get(propertyKey(o)) || []).some((x) => x.id !== o.id && x.d < ref);
+  };
+}
 
 // win rate, by the workspace's rule. "properties": each property once, won if any of its deals was
 // won, lost if it only lost. Renewals and change orders do not stack up wins. "off": no tile.

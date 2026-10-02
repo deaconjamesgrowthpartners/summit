@@ -1,9 +1,10 @@
 // Grow and Net New. Same screen, one team each, words from the tab config.
-import { S, wk, goals, isLeader, repsScoped, commitFor, oppsAll, fromCrm } from '../data/store.js';
+import { S, wk, goals, isLeader, repsScoped, commitFor, oppsAll, oppsScoped, fromCrm, branchList } from '../data/store.js';
 import { esc, money } from '../lib/format.js';
 import { mLabel } from '../data/workspace.js';
 import { lockLabel, isLockedWeek } from '../lib/time.js';
-import { isOpen, isWon, stageOf, ryg, autoDid, didValue, comValue, hasVal, flag } from '../lib/rules.js';
+import { isOpen, isWon, stageOf, ryg, autoDid, autoDidRows, didValue, comValue, hasVal, flag, sum, autoSource, isBidMeasure, bidNote } from '../lib/rules.js';
+import { repBreakdown } from '../lib/summit.js';
 import { renderGrid, canEditOpp } from './grid.js';
 import { renderBook } from './book.js';
 
@@ -46,22 +47,37 @@ export function renderTeam(el, tab) {
   const bm = (tab.branch_measures || cfg.measures.map((m) => m.key)).map((k) => cfg.measures.find((m) => m.key === k)).filter(Boolean);
   const ratio = tab.ratio && cfg.measures.some((m) => m.key === tab.ratio.num) && cfg.measures.some((m) => m.key === tab.ratio.den) ? tab.ratio : null;
   const ratioGoal = ratio ? +goals()[ratio.goal] || 0 : 0;
-  const branchRows = cfg.branches.map((b) => {
-    const rs = rr.filter((x) => x.branch === b);
-    if (!rs.length) return null;
-    const t = {};
-    cfg.measures.forEach((m) => (t[m.key] = { c: 0, d: 0 }));
-    rs.forEach((x) => { const c = commitFor(x.id, w.scoreKey), a = autoDid(cfg, opps, x.id, w.scoreKey); cfg.measures.forEach((m) => { t[m.key].c += comValue(c, m.key); t[m.key].d += didValue(c, a, m.key); }); });
-    const rv = ratio && t[ratio.den].d ? t[ratio.num].d / t[ratio.den].d : 0;
-    return { b, t, rv, den: ratio ? t[ratio.den].d : 0 };
-  }).filter(Boolean);
+  // Every dollar lands on a row. From the CRM, deals whose rep is not on the roster get their own
+  // row under their branch, with the CRM's rep names under the open dollars. Grey tag, never red.
+  const crmMode = fromCrm();
+  const unassigned = crmMode ? oppsScoped().filter((o) => o.unassigned) : [];
+  const branchRows = [];
+  for (const b of [...(crmMode ? branchList() : cfg.branches), ...(unassigned.some((o) => !o.branch) ? [''] : [])]) {
+    const rs = b ? rr.filter((x) => x.branch === b) : [];
+    const U = unassigned.filter((o) => (b ? o.branch === b : !o.branch));
+    if (rs.length) {
+      const t = {};
+      cfg.measures.forEach((m) => (t[m.key] = { c: 0, d: 0 }));
+      rs.forEach((x) => { const c = commitFor(x.id, w.scoreKey), a = autoDid(cfg, opps, x.id, w.scoreKey); cfg.measures.forEach((m) => { t[m.key].c += comValue(c, m.key); t[m.key].d += didValue(c, a, m.key); }); });
+      const rv = ratio && t[ratio.den].d ? t[ratio.num].d / t[ratio.den].d : 0;
+      const ids = new Set(rs.map((x) => x.id));
+      const open = opps.filter((o) => ids.has(o.owner_member_id) && isOpen(cfg, o));
+      branchRows.push({ b, t, rv, den: ratio ? t[ratio.den].d : 0, open: sum(open), openN: open.length });
+    }
+    if (U.length) {
+      const a = autoDidRows(cfg, U, w.scoreKey), t = {};
+      cfg.measures.forEach((m) => (t[m.key] = m.key in a ? { c: 0, d: a[m.key] } : null));
+      const open = U.filter((o) => isOpen(cfg, o));
+      branchRows.push({ b, t, unassigned: true, open: sum(open), openN: open.length, reps: repBreakdown(open) });
+    }
+  }
   const ratioDot = (x) => (!x.den ? 'n' : !ratioGoal ? 'n' : x.rv >= ratioGoal ? 'g' : x.rv >= 0.7 * ratioGoal ? 'y' : 'r');
 
   const didRow = (label, week, c, a) => `<tr><td>${label}</td>${cfg.measures.map((m) => {
     const com = comValue(c, m.key), did = didValue(c, a, m.key);
     const manual = c && c.actual && hasVal(c.actual[m.key]);
     const auto = m.key in a;
-    return `<td class="num"><span class="dot ${c ? ryg(did, com) : 'n'}"></span> <input class="ed num" inputmode="decimal" ${canEdit ? '' : 'disabled'} data-cm="${esc(r.id)}" data-cw="${week}" data-cf="actual" data-ck="${esc(m.key)}" value="${manual ? esc(c.actual[m.key]) : ''}" placeholder="${auto ? esc(fmtM(m, a[m.key])) : '0'}" aria-label="${esc(lab(m))} did"><div class="auto">${auto && !manual ? 'from board' : ''}</div></td>`;
+    return `<td class="num"><span class="dot ${c ? ryg(did, com) : 'n'}"></span> <input class="ed num" inputmode="decimal" ${canEdit ? '' : 'disabled'} data-cm="${esc(r.id)}" data-cw="${week}" data-cf="actual" data-ck="${esc(m.key)}" value="${manual ? esc(c.actual[m.key]) : ''}" placeholder="${auto ? esc(fmtM(m, a[m.key])) : '0'}" aria-label="${esc(lab(m))} did"><div class="auto">${auto && !manual ? esc(autoSource(cfg, m)) : ''}</div></td>`;
   }).join('')}</tr>`;
 
   const committedAt = thisC && thisC.submitted_at
@@ -83,15 +99,19 @@ export function renderTeam(el, tab) {
       </tbody></table></div>
       <div class="row-actions">
         ${thisC ? `<span class="pill ${late ? 'y' : 'g'}">Committed${committedAt ? ' ' + esc(committedAt) : ''}${late ? ' · edited after lock' : ''}</span>` : `<span class="pill ${w.locked ? 'r' : 'n'}">${w.locked ? 'No commit this week' : 'Not committed yet'}</span>`}
+        ${crmMode && cfg.measures.some((m) => m.auto && isBidMeasure(m)) ? `<span class="help">${esc(bidNote(cfg))}</span>` : ''}
         <span class="help">${cfg.measures.length} numbers. Two minutes. Type them and they save. ${w.locked ? 'Commits are locked. Changes show as late. Enter what you did before midnight.' : `Locks ${esc(lockLabel(cfg))}.`}</span>
       </div>
       <div style="margin-top:8px"><input class="ed txt wide" ${dis(w.key)} data-cm="${esc(r.id)}" data-cw="${w.key}" data-cf="note" placeholder="${esc(tab.note_prompt || 'What do you need this week?')}" value="${esc(thisC?.note || '')}" aria-label="Note"></div>
     </div>
     <div class="card">
       <div class="sec-h"><h2 class="s16">Branches · ${esc(w.scoreLabel.toLowerCase())}</h2><span class="sub">${esc(ratio?.sub || 'did / committed')}</span></div>
-      <div class="tw flat"><table><thead><tr><th>Branch</th>${bm.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}${ratio ? `<th class="num">${esc(ratio.label)}</th>` : ''}</tr></thead><tbody>
-      ${branchRows.map((x) => `<tr><td><b>${esc(x.b)}</b></td>${bm.map((m) => `<td class="num">${m.auto === 'won_value' ? `<span class="dot ${ryg(x.t[m.key].d, x.t[m.key].c)}"></span> ` : ''}${fmtM(m, x.t[m.key].d)}<small class="m">/${fmtM(m, x.t[m.key].c)}</small></td>`).join('')}${ratio ? `<td class="num"><span class="dot ${ratioDot(x)}"></span> ${x.rv.toFixed(1)}</td>` : ''}</tr>`).join('')}
+      <div class="tw flat"><table><thead><tr><th>Branch</th>${bm.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}${ratio ? `<th class="num">${esc(ratio.label)}</th>` : ''}${crmMode ? '<th class="num">Open $</th>' : ''}</tr></thead><tbody>
+      ${branchRows.map((x) => x.unassigned
+        ? `<tr class="unas"><td><b>${x.b ? esc(x.b) : 'No branch'}</b> <span class="pill n">not on roster</span>${repLines(x.reps, 4, 'open')}</td>${bm.map((m) => `<td class="num">${x.t[m.key] ? fmtM(m, x.t[m.key].d) : '<span class="m">—</span>'}</td>`).join('')}${ratio ? '<td class="num"><span class="m">—</span></td>' : ''}<td class="num">${money(x.open)}<small class="m"> ·${x.openN}</small></td></tr>`
+        : `<tr><td><b>${esc(x.b)}</b></td>${bm.map((m) => `<td class="num">${m.auto === 'won_value' ? `<span class="dot ${ryg(x.t[m.key].d, x.t[m.key].c)}"></span> ` : ''}${fmtM(m, x.t[m.key].d)}<small class="m">/${fmtM(m, x.t[m.key].c)}</small></td>`).join('')}${ratio ? `<td class="num"><span class="dot ${ratioDot(x)}"></span> ${x.rv.toFixed(1)}</td>` : ''}${crmMode ? `<td class="num">${money(x.open)}<small class="m"> ·${x.openN}</small></td>` : ''}</tr>`).join('')}
       </tbody></table></div>
+      ${branchRows.some((x) => x.unassigned) ? `<p class="note">Not on roster: deals whose ${esc(cfg.crmLabel)} rep matches nobody in Summit, by branch. Their names and open dollars sit under the branch. They show on Grow and Net New until the rep is added to the roster. Typed numbers like site audits have no one to type them, so they read —.</p>` : ''}
       ${tab.branch_note ? `<p class="note">${esc(tab.branch_note)}</p>` : ''}
     </div>
   </div>
@@ -113,4 +133,11 @@ export function renderTeam(el, tab) {
       ? `<p class="note">From ${esc(cfg.crmLabel)}, synced nightly. Change a deal in ${esc(cfg.crmLabel)} and it updates here the next morning. Focus list = everything open plus won work that has not started. Red: expected close passed, or a bid out with no start date. Yellow: a date or value missing.</p>`
       : '<p class="note">Focus list = your priority accounts plus anything past the early stages or waiting to install. Star a row to pin it. Red: next step past due, no touch in 14 days, bid out with no start date. Yellow: due in 3 days or a field missing.</p>'}
   </div>`;
+}
+
+// the CRM rep names behind an unassigned row's dollars, biggest first. Plain text, no color.
+export function repLines(reps, max = 4, what = '') {
+  if (!reps || !reps.length) return '';
+  const top = reps.slice(0, max);
+  return `<div class="reps">${top.map((r) => `<div><span>${esc(r.name || 'no rep')}</span> ${money(r.value)}${what ? ` ${esc(what)}` : ''}</div>`).join('')}${reps.length > max ? `<div class="m">and ${reps.length - max} more</div>` : ''}</div>`;
 }

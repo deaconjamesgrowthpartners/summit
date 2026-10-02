@@ -1,4 +1,6 @@
-import { S, wk, goals, isLeader, scopeLabel, oppsScoped, oppsAll, repsScoped, commitFor, memberById, repOf, fromCrm } from '../data/store.js';
+import { S, wk, goals, isLeader, scopeLabel, oppsScoped, oppsAll, repsScoped, commitFor, memberById, repOf, fromCrm, branchList, tabFor } from '../data/store.js';
+import { monthLabel, monthEnd } from '../lib/period.js';
+import { addDays } from '../lib/format.js';
 import { esc, money, fmtDate } from '../lib/format.js';
 import { lockLabel } from '../lib/time.js';
 import { goalFields } from '../data/workspace.js';
@@ -46,6 +48,7 @@ export function renderCheck(el) {
           : `<input class="ed num" inputmode="decimal" data-g="${esc(x.key)}" data-gt="num" value="${esc(g[x.key] ?? '')}">`}</div>`).join('')}
         <p class="note">Period ${esc(S.goalsRow?.period || String(w.year))}.</p>
       </div>` : ''}
+      ${leader && tabFor('summit') ? targetsCard(cfg, w) : ''}
     </div>
   </div>`;
 }
@@ -98,4 +101,30 @@ function mapCheck(cfg) {
     ${oneTime.length ? `<div class="kv"><span>One-time, no category rule: ${oneTime.map(([k, n]) => `${esc(k)} ${n}`).join(', ')}</span><span class="pill n">${total(oneTime)}</span></div>` : ''}
     ${noDivision ? `<div class="kv"><span>No division in ${esc(cfg.crmLabel)}</span><span class="pill y">${noDivision}</span></div>` : ''}
     ${all.some((o) => o.unassigned && isOpen(cfg, o)) ? `<div class="kv"><span>Open deals with a rep not on the roster</span><span class="pill y">${all.filter((o) => o.unassigned && isOpen(cfg, o)).length}</span></div>` : ''}`;
+}
+
+// Summit tile targets, leadership only. One month and one tile at a time: the company and each
+// branch, for All, Maintenance and Install. The table can hold Enhancement / Net New too; this
+// editor leaves them out on purpose. Blank means no target, and the tile says "no target set".
+const T_METRICS = [['closed', 'Closed contracts'], ['created', 'Pipeline created'], ['forecast', 'Forecast']];
+const T_DIVS = [['all', 'All'], ['maintenance', 'Maintenance'], ['install', 'Install']];
+function targetsCard(cfg, w) {
+  const months = [];
+  for (let m = `${w.year}-01-01`, i = 0; i < 15; i++, m = addDays(monthEnd(m), 1)) months.push(m);
+  const cur = `${w.today.slice(0, 7)}-01`;
+  const month = months.includes(S.filters.tgt_month) ? S.filters.tgt_month : cur;
+  const metric = T_METRICS.some(([k]) => k === S.filters.tgt_metric) ? S.filters.tgt_metric : 'closed';
+  const val = (branch, division) => {
+    const t = (S.targets || []).find((x) => x.branch === branch && x.month === month && x.metric === metric && x.division === division && x.kind === 'all');
+    return t ? Math.round(+t.amount) : '';
+  };
+  const rows = [['', 'Company'], ...branchList().map((b) => [b, b])];
+  return `<div class="card mb tgt"><h2 class="s15" style="margin-bottom:6px">Summit targets (leadership)</h2>
+    <div class="bar"><select class="ed" data-f="tgt_month" aria-label="Month">${months.map((m) => `<option value="${m}" ${m === month ? 'selected' : ''}>${esc(monthLabel(m))}</option>`).join('')}</select>
+      <select class="ed" data-f="tgt_metric" aria-label="Tile">${T_METRICS.map(([k, l]) => `<option value="${k}" ${k === metric ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+    <div class="tw flat"><table><thead><tr><th></th>${T_DIVS.map(([, l]) => `<th class="num">${esc(l)}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(([b, l]) => `<tr><td>${esc(l)}</td>${T_DIVS.map(([d, dl]) => `<td class="num"><input class="ed num" inputmode="decimal" placeholder="$" data-tgt="${esc(b)}|${month}|${metric}|${d}" value="${val(b, d)}" aria-label="${esc(`${l} ${dl} ${monthLabel(month)}`)}"></td>`).join('')}</tr>`).join('')}
+    </tbody></table></div>
+    <p class="note">Monthly. Quarter and Year add up the months, and Week takes its share of the month by days. A company number wins over the branches for that month; leave it blank and the tile adds up the branches.</p>
+  </div>`;
 }

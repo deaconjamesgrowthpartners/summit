@@ -66,5 +66,9 @@ export function fromAspire(cfg, r) {
     actual_close: won ? day(r.won_date) : null,
     lost_date: lost ? day(r.lost_date) || day(r.aspire_modified_at) : null,
     modified: r.aspire_modified_at || null,
+    // migration 011. Absent before it runs, so every screen copes with null.
+    created_date: day(r.created_date),
+    end_date: day(r.end_date),
+    renewal_date: day(r.renewal_date),
   };
 }

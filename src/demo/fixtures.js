@@ -186,7 +186,15 @@ export function fixtures(now = new Date()) {
       anticipated_close_date: !wonish && status !== 'Lost' && r() > 0.25 ? addDays(d, Math.round(-10 + r() * 60)) : null,
       won_date: wonDate, lost_date: status === 'Lost' ? addDays(d, -Math.round(r() * 200)) : null,
       aspire_modified_at: addDays(d, -Math.round(r() * 30)) + 'T10:00:00', synced_at: now.toISOString(),
+      // migration 011: created, end and renewal dates. Most deals have an end date, fewer a renewal date.
+      created_date: wonDate ? addDays(wonDate, -Math.round(5 + r() * 60)) : addDays(d, -Math.round(r() * 150)),
+      end_date: null, renewal_date: null,
     };
+  });
+  pipeline.forEach((x) => {
+    if (!x.won_date || r() < 0.08) return;
+    x.end_date = addDays(x.won_date, x.division_name.includes('Maintenance') ? 365 : 120);
+    if (r() < 0.45) x.renewal_date = addDays(x.end_date, -30);
   });
   // PropertyID by property, the way Aspire keys them
   const pid = {};
@@ -196,5 +204,13 @@ export function fixtures(now = new Date()) {
     ['Riverside HOA', 'Sample estimate', 'Approved']].forEach(([prop, opp, status], i) => pipeline.push({
     ...pipeline[i], opportunity_id: 29000 + i, opportunity_number: 9900 + i, property_name: prop, opportunity_name: opp, status_name: status,
     won_dollars: status === 'Won' ? 99000 : null, won_date: status === 'Won' ? d : null, division_name: 'RES - Maintenance' }));
-  return { workspaces: [WS], members, opps, commits, goals, accounts, sync, pipeline };
+  // a few targets, so the demo shows both a tile with a target and one that says "no target set"
+  const m0 = `${d.slice(0, 7)}-01`;
+  const targets = [
+    { workspace_id: WS.id, branch: '', month: m0, metric: 'closed', division: 'all', kind: 'all', amount: 400000 },
+    { workspace_id: WS.id, branch: 'Oakwood', month: m0, metric: 'closed', division: 'all', kind: 'all', amount: 150000 },
+    { workspace_id: WS.id, branch: '', month: m0, metric: 'created', division: 'all', kind: 'all', amount: 600000 },
+    { workspace_id: WS.id, branch: '', month: m0, metric: 'closed', division: 'maintenance', kind: 'all', amount: 180000 },
+  ];
+  return { workspaces: [WS], members, opps, commits, goals, accounts, sync, pipeline, targets, tracking: d };
 }

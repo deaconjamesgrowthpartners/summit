@@ -5,9 +5,42 @@ import { createClient } from '@supabase/supabase-js';
 const URL = import.meta.env.VITE_SUPABASE_URL || 'https://tyrtzxnhwjchtemytfxv.supabase.co';
 const KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_-ex161UOlee5nRgib3zI3g_mCRfNsF_';
 
+// A link made outside the app (an invite or magic link from the Supabase dashboard) lands with the
+// session in the URL hash (#access_token=...), or with ?token_hash=...&type=invite when the email
+// template uses one. This client runs the PKCE flow, which refuses both, so they are taken out of
+// the URL before the client starts and handed to it by hand. The URL is cleaned either way.
+function linkFromUrl() {
+  if (typeof location === 'undefined') return null;
+  const h = new URLSearchParams(location.hash.replace(/^#/, '')), q = new URLSearchParams(location.search);
+  let link = null;
+  if (h.get('access_token') && h.get('refresh_token')) link = { access_token: h.get('access_token'), refresh_token: h.get('refresh_token') };
+  else if (q.get('token_hash') && q.get('type')) link = { token_hash: q.get('token_hash'), type: q.get('type') };
+  else if (h.get('error_description') || h.get('error')) link = { error: h.get('error_code') || h.get('error') || 'link_error' };
+  if (!link) return null;
+  const u = new URL(location.href);
+  u.hash = '';
+  for (const k of ['token_hash', 'type', 'next']) u.searchParams.delete(k);
+  history.replaceState(null, '', u);
+  return link;
+}
+const pendingLink = linkFromUrl();
+
 const sb = createClient(URL, KEY, {
   auth: { flowType: 'pkce', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
+
+// why a link did not sign anyone in, for the login screen. null when there was no link or it worked.
+export let linkError = null;
+const linkDone = (async () => {
+  if (!pendingLink) return;
+  try {
+    if (pendingLink.error) throw new Error(pendingLink.error);
+    if (pendingLink.access_token) must(await sb.auth.setSession(pendingLink));
+    else must(await sb.auth.verifyOtp({ token_hash: pendingLink.token_hash, type: pendingLink.type }));
+  } catch (e) {
+    linkError = /expired|otp_expired/i.test(String(e?.message || e?.code || '')) ? 'expired' : 'failed';
+  }
+})();
 
 const must = ({ data, error }) => {
   if (error) throw error;
@@ -27,6 +60,7 @@ export const demo = false;
 
 /* ---------- auth ---------- */
 export async function session() {
+  await linkDone;
   return must(await sb.auth.getSession()).session;
 }
 export function onAuth(cb) {
@@ -53,6 +87,11 @@ export async function workspaces() {
 export async function workspace(slug) {
   return must(await sb.from('workspaces').select('*').eq('slug', slug).eq('active', true).maybeSingle());
 }
+// tie this login to its roster row and admin row by email (migration 011). A login made by a dashboard
+// invite has no link yet. Harmless before 011 runs: the call fails and nothing changes.
+export async function linkMember() {
+  try { return must(await sb.rpc('summit_link_member')); } catch { return 0; }
+}
 export async function isAdmin(userId) {
   const rows = must(await sb.from('app_admins').select('user_id').eq('user_id', userId));
   return rows.length > 0;
@@ -70,9 +109,10 @@ export async function load(wsId, sinceWeek, source = 'summit') {
     // the book is optional. a workspace without one still loads.
     all(() => sb.from('accounts').select('*').eq('workspace_id', wsId).order('property')).catch(() => []),
   ]);
+  const extra = { sync: await syncLog(wsId), targets: await targets(wsId), tracking: source === 'aspire' ? await trackingSince(wsId) : null };
   return source === 'aspire'
-    ? { members, opps: [], pipeline: opps, commits, goals, accounts, sync: await syncLog(wsId) }
-    : { members, opps, commits, goals, accounts, sync: await syncLog(wsId) };
+    ? { members, opps: [], pipeline: opps, commits, goals, accounts, ...extra }
+    : { members, opps, commits, goals, accounts, ...extra };
 }
 // the Aspire sync log and the names Aspire has that the roster does not. null before migration 007.
 export async function syncLog(wsId) {
@@ -80,6 +120,24 @@ export async function syncLog(wsId) {
     const runs = must(await sb.from('aspire_sync_runs').select('*').eq('workspace_id', wsId).order('started_at', { ascending: false }).limit(6));
     const unmatched = must(await sb.from('aspire_unmatched').select('*').eq('workspace_id', wsId).order('deals', { ascending: false }));
     return { runs, unmatched };
+  } catch {
+    return null;
+  }
+}
+
+// Summit tile targets (migration 011). Empty before it runs.
+export async function targets(wsId) {
+  try {
+    return must(await sb.from('summit_targets').select('*').eq('workspace_id', wsId));
+  } catch {
+    return [];
+  }
+}
+// the first day a status snapshot was written: when "pipeline advanced" became measurable
+export async function trackingSince(wsId) {
+  try {
+    const rows = must(await sb.from('aspire_status_snapshots').select('snap_date').eq('workspace_id', wsId).order('snap_date').limit(1));
+    return rows[0]?.snap_date || null;
   } catch {
     return null;
   }
@@ -121,6 +179,17 @@ export async function insertCommit(row) {
 }
 export async function updateCommit(id, patch) {
   return must(await sb.from('commits').update(patch).eq('id', id).select().single());
+}
+// leaders and admins only: RLS refuses everyone else. amount null removes the target.
+export async function saveTarget(row, amount) {
+  const key = { workspace_id: row.workspace_id, branch: row.branch, month: row.month, metric: row.metric, division: row.division, kind: row.kind };
+  if (amount === null) {
+    let q = sb.from('summit_targets').delete();
+    for (const [k, v] of Object.entries(key)) q = q.eq(k, v);
+    must(await q);
+    return null;
+  }
+  return must(await sb.from('summit_targets').upsert({ ...key, amount, updated_at: new Date().toISOString() }).select().single());
 }
 export async function saveGoals(wsId, period, values) {
   return must(await sb.from('goals').upsert({ workspace_id: wsId, period, values }).select().single());
