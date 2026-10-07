@@ -11,6 +11,8 @@ comes from their `workspaces` row. Nothing about a client is in the code.
 npm install
 npm run dev        # real Supabase, needs a roster login
 npm run demo       # fake data in memory, no login. ?as=leader|grow1|grow2|bdm1|bdm2, ?now=<ISO time> to pin the clock
+                   #   ?mode=connected|csv|native: Elevation on Aspire, on a CSV upload, or typed (the default)
+                   #   /29029?as=joe|lisa and /deacon-james?as=joe|sourcer1|djlead: the two workspaces with no CRM
 npm test           # week and lock math, must match summit_week_key / summit_lock_at
 npm run build      # production bundle in dist/ (demo code is never included)
 ```
@@ -38,6 +40,12 @@ Env (optional, the publishable key and URL are the defaults):
    - `011_summit_rebuild.sql`: created, end and renewal dates on `aspire_pipeline`, the `summit_targets` table,
      the nightly status snapshot (`aspire_status_snapshots`), and `summit_link_member()`, which ties a login to its
      roster row by email. See "The Summit tab" below.
+   - `012_deal_sources.sql`: one deal layer for every source. See "Where deals come from" below. One transaction,
+     and it refuses to commit unless Elevation's board reads exactly what it read before.
+   - `013_csv_import.sql`: CSV upload, preview first, nothing removed without a leader's tick.
+   - `014_native_deals.sql`: typed deals, the change log, the account list, the viewer role.
+   - `015_workspaces_29029_deacon_james.sql`: the two workspaces with no CRM. Config only.
+   - `016_source_sync_cutover.sql`: only after `source-sync` is deployed and has run once. Moves the nightly job.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
@@ -75,13 +83,39 @@ Env (optional, the publishable key and URL are the defaults):
   all read it, and a test fails if a screen picks its own week. The database still locks and
   stamps late edits at the lock.
 
+## Where deals come from
+
+A workspace has exactly one source of truth for deals: its row in `deal_sources`. Never two.
+- `connected`: a CRM feeds it through a connector (Aspire is the only one built). Read only in Summit.
+  Reps type only their commits. Elevation.
+- `csv`: a leader uploads a file on Data Check, maps its columns once, sees what would be added, changed and
+  missing, and only then writes it. A deal missing from the file stays unless a leader ticks it, and a ticked
+  deal is marked removed, never deleted. Read only between uploads.
+- `native`: no CRM. Reps type and edit their own deals, leaders anything in the workspace, viewers nothing.
+  Summit is the system of record. Every change is logged in `deal_changes`; a stage change writes the day's
+  row in `deal_snapshots`, so pipeline advanced works from day one.
+
+Every deal lives in `deals`, keyed on source plus external id, with the whole source record in `raw`.
+The board reads `deal_board`. The header says where the deals come from and when they last changed.
+A connector's field names live in `deal_sources.mapping` (canonical field -> source field, or a list tried in
+order), and credentials are a name (`env:ASPIRE`), never the secret. A workspace made after 012 starts native;
+make it connected or csv by updating its `deal_sources` row.
+
 ## Workspace row shape
 
 - `brand`: `head`, `accent`, `bg`, `panel`, `muted` (hex), `font` (Google Font name), `logo` (https url or null)
-- `measures[]`: `key`, `type` (count|money), `label`, `label_grow`, `label_netnew`,
-  `auto` (bids_count | bids_value | won_value | starts_next_week_value, fills from the board)
-- `tabs[]`: `key` (summit | climb | grow | netnew | accounts | datacheck), `label`, plus per-tab words
-  (`title`, `sub`, `team_label`, `note`, `note_prompt`, `branch_note`, `branch_measures`, `ratio`, `crm_label`)
+- `measures[]`: `key`, `type` (count|money), `label`, `labels` (`{team: label}`; `label_<team>` still reads),
+  `auto`: a board number (bids_count | bids_value | won_value | starts_next_week_value), or
+  `{"stage_entered": "<stage>"}`, the deals that first reached that stage or past it that week
+  (`"sum": "value"` for dollars). Stage history comes from the change log, so this is for typed deals.
+- `tabs[]`: `key` (summit | climb | accounts | datacheck, or any key with a `team`), `label`, plus per-tab words
+  (`title`, `sub`, `team_label`, `note`, `note_prompt`, `branch_note`, `branch_measures`, `ratio`, `crm_label`).
+  A team tab: `team` (matches `members.team`), `measures` (the keys that team commits to; all when unset),
+  `labels` (`{measure key: label}` on that tab only). `crm_label` on Data Check turns on the paste cross-check
+  for typed deals.
+- `tabs[summit]`: `filters` (`["division", "kind"]` by default, `[]` for none), `words` (`maintenance`,
+  `install`, `enhancement`, `netnew`), `deal_word`. With fewer than two branches the board goes by rep.
+- `members.role`: leader, rep, or viewer (reads everything, writes nothing).
 - `stages[]`: `name`, `prob`, `status` (open|won|lost), `needs_close`, `bid`, `hold`
 - `categories[]`: `name`, `recurring`, `default_for` (grow|netnew)
 - `tabs[].book` (on one team tab): `label`, `audit_days`, `levels[]` (`value`, `color` g|y|r), `risk[]` (levels that count as at risk).
@@ -91,6 +125,12 @@ Env (optional, the publishable key and URL are the defaults):
   `deadline`, `coverage`. The values live in `goals.values` for the current year.
 
 ## Aspire sync
+
+Since 012 the function is `supabase/functions/source-sync`: one runner for any connector, with Aspire as the
+first. It takes `{"source": <id>}` or `{"workspace": "<slug>"}`, and with neither, the one connected source.
+Deploy it (paste `supabase/dashboard/source-sync.ts`, or `supabase functions deploy source-sync --project-ref
+tyrtzxnhwjchtemytfxv`), run it once by hand, then run 016. Until then the old `aspire-sync` keeps working:
+012 kept the names it calls. What follows is how the Aspire connector behaves.
 
 `supabase/functions/aspire-sync` makes Aspire the pipeline source for any workspace with
 `crm_source = 'aspire'` (Elevation, set by 007). It reads Aspire and writes Summit. Nothing else.

@@ -1,7 +1,7 @@
-// Grow and Net New. Same screen, one team each, words from the tab config.
-import { S, wk, goals, isLeader, repsScoped, commitFor, oppsAll, oppsScoped, fromCrm, branchList } from '../data/store.js';
+// A team tab: Grow, Net New, Outreach, Sourcing... Same screen, one team each. The team's measures and words come from the tab config.
+import { S, wk, goals, isLeader, repsScoped, commitFor, oppsAll, oppsScoped, fromCrm, branchList, sourceNote, teamTabs, byBranch as splitByBranch } from '../data/store.js';
 import { esc, money } from '../lib/format.js';
-import { mLabel } from '../data/workspace.js';
+import { mLabel, teamMeasures } from '../data/workspace.js';
 import { lockLabel, isLockedWeek } from '../lib/time.js';
 import { isOpen, isWon, stageOf, ryg, autoDid, autoDidRows, didValue, comValue, hasVal, flag, sum, autoSource, isBidMeasure, bidNote } from '../lib/rules.js';
 import { repBreakdown } from '../lib/summit.js';
@@ -19,6 +19,7 @@ export function renderTeam(el, tab) {
     return;
   }
   const lab = (m) => mLabel(m, team);
+  const ms = teamMeasures(cfg, team);
   const fmtM = (m, v) => (m.money ? money(v) : v);
   const scoreC = commitFor(r.id, w.scoreKey), scoreA = autoDid(cfg, opps, r.id, w.scoreKey), thisC = commitFor(r.id, w.key);
   const canEdit = S.admin || (S.me && S.me.active && (S.me.id === r.id || S.me.role === 'leader'));
@@ -43,17 +44,20 @@ export function renderTeam(el, tab) {
     : sortK === 'flag' ? fo[flag(cfg, a, w.today, S.crm)] - fo[flag(cfg, b, w.today, S.crm)]
     : (a.start_date || '9999') < (b.start_date || '9999') ? -1 : 1);
 
-  // branch card
-  const bm = (tab.branch_measures || cfg.measures.map((m) => m.key)).map((k) => cfg.measures.find((m) => m.key === k)).filter(Boolean);
-  const ratio = tab.ratio && cfg.measures.some((m) => m.key === tab.ratio.num) && cfg.measures.some((m) => m.key === tab.ratio.den) ? tab.ratio : null;
+  // branch card, or the team rep by rep when the workspace has no branches
+  const bm = (tab.branch_measures || ms.map((m) => m.key)).map((k) => ms.find((m) => m.key === k)).filter(Boolean);
+  const ratio = tab.ratio && ms.some((m) => m.key === tab.ratio.num) && ms.some((m) => m.key === tab.ratio.den) ? tab.ratio : null;
   const ratioGoal = ratio ? +goals()[ratio.goal] || 0 : 0;
   // Every dollar lands on a row. From the CRM, deals whose rep is not on the roster get their own
   // row under their branch, with the CRM's rep names under the open dollars. Grey tag, never red.
   const crmMode = fromCrm();
   const unassigned = crmMode ? oppsScoped().filter((o) => o.unassigned) : [];
   const branchRows = [];
-  for (const b of [...(crmMode ? branchList() : cfg.branches), ...(unassigned.some((o) => !o.branch) ? [''] : [])]) {
-    const rs = b ? rr.filter((x) => x.branch === b) : [];
+  const byBranch = splitByBranch();
+  // without branches, each rep is a row of their own
+  const keys = byBranch ? [...(crmMode ? branchList() : cfg.branches), ...(unassigned.some((o) => !o.branch) ? [''] : [])] : rr.map((x) => `m:${x.id}`);
+  for (const b of keys) {
+    const rs = !byBranch ? rr.filter((x) => `m:${x.id}` === b) : b ? rr.filter((x) => x.branch === b) : [];
     const U = unassigned.filter((o) => (b ? o.branch === b : !o.branch));
     if (rs.length) {
       const t = {};
@@ -62,7 +66,7 @@ export function renderTeam(el, tab) {
       const rv = ratio && t[ratio.den].d ? t[ratio.num].d / t[ratio.den].d : 0;
       const ids = new Set(rs.map((x) => x.id));
       const open = opps.filter((o) => ids.has(o.owner_member_id) && isOpen(cfg, o));
-      branchRows.push({ b, t, rv, den: ratio ? t[ratio.den].d : 0, open: sum(open), openN: open.length });
+      branchRows.push({ b: byBranch ? b : rs[0].full_name, person: !byBranch, t, rv, den: ratio ? t[ratio.den].d : 0, open: sum(open), openN: open.length });
     }
     if (U.length) {
       const a = autoDidRows(cfg, U, w.scoreKey), t = {};
@@ -73,7 +77,7 @@ export function renderTeam(el, tab) {
   }
   const ratioDot = (x) => (!x.den ? 'n' : !ratioGoal ? 'n' : x.rv >= ratioGoal ? 'g' : x.rv >= 0.7 * ratioGoal ? 'y' : 'r');
 
-  const didRow = (label, week, c, a) => `<tr><td>${label}</td>${cfg.measures.map((m) => {
+  const didRow = (label, week, c, a) => `<tr><td>${label}</td>${ms.map((m) => {
     const com = comValue(c, m.key), did = didValue(c, a, m.key);
     const manual = c && c.actual && hasVal(c.actual[m.key]);
     const auto = m.key in a;
@@ -91,27 +95,27 @@ export function renderTeam(el, tab) {
   <div class="commit">
     <div class="card cform">
       <div class="sec-h"><h2 class="s16">My week · <span class="person">${esc(r.full_name)}</span>${r.branch ? ' · ' + esc(r.branch) : ''}</h2>${canEdit ? '' : '<span class="ro">view only</span>'}</div>
-      <div class="tw bare"><table><thead><tr><th></th>${cfg.measures.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}</tr></thead><tbody>
-        ${w.locked ? '' : `<tr><td>Last week committed</td>${cfg.measures.map((m) => `<td class="num">${scoreC ? fmtM(m, comValue(scoreC, m.key)) : '<span class="m" style="color:var(--muted)">none</span>'}</td>`).join('')}</tr>
+      <div class="tw bare"><table><thead><tr><th></th>${ms.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}</tr></thead><tbody>
+        ${w.locked ? '' : `<tr><td>Last week committed</td>${ms.map((m) => `<td class="num">${scoreC ? fmtM(m, comValue(scoreC, m.key)) : '<span class="m" style="color:var(--muted)">none</span>'}</td>`).join('')}</tr>
         ${didRow('Last week did', w.scoreKey, scoreC, scoreA)}`}
-        <tr><td>${w.locked ? 'This week committed' : 'This week I commit to'}</td>${cfg.measures.map((m) => `<td class="num"><input class="ed num ${late ? 'late' : ''}" inputmode="decimal" ${dis(w.key)} data-cm="${esc(r.id)}" data-cw="${w.key}" data-cf="committed" data-ck="${esc(m.key)}" value="${thisC && hasVal(thisC.committed?.[m.key]) ? esc(thisC.committed[m.key]) : ''}" placeholder="${m.money ? '$' : '#'}" aria-label="${esc(lab(m))} commit"></td>`).join('')}</tr>
+        <tr><td>${w.locked ? 'This week committed' : 'This week I commit to'}</td>${ms.map((m) => `<td class="num"><input class="ed num ${late ? 'late' : ''}" inputmode="decimal" ${dis(w.key)} data-cm="${esc(r.id)}" data-cw="${w.key}" data-cf="committed" data-ck="${esc(m.key)}" value="${thisC && hasVal(thisC.committed?.[m.key]) ? esc(thisC.committed[m.key]) : ''}" placeholder="${m.money ? '$' : '#'}" aria-label="${esc(lab(m))} commit"></td>`).join('')}</tr>
         ${w.locked ? didRow('This week did', w.scoreKey, scoreC, scoreA) : ''}
       </tbody></table></div>
       <div class="row-actions">
         ${thisC ? `<span class="pill ${late ? 'y' : 'g'}">Committed${committedAt ? ' ' + esc(committedAt) : ''}${late ? ' · edited after lock' : ''}</span>` : `<span class="pill ${w.locked ? 'r' : 'n'}">${w.locked ? 'No commit this week' : 'Not committed yet'}</span>`}
-        ${crmMode && cfg.measures.some((m) => m.auto && isBidMeasure(m)) ? `<span class="help">${esc(bidNote(cfg))}</span>` : ''}
-        <span class="help">${cfg.measures.length} numbers. Two minutes. Type them and they save. ${w.locked ? 'Commits are locked. Changes show as late. Enter what you did before midnight.' : `Locks ${esc(lockLabel(cfg))}.`}</span>
+        ${crmMode && ms.some((m) => m.auto && isBidMeasure(m)) ? `<span class="help">${esc(bidNote(cfg))}</span>` : ''}
+        <span class="help">${ms.length} numbers. Two minutes. Type them and they save. ${w.locked ? 'Commits are locked. Changes show as late. Enter what you did before midnight.' : `Locks ${esc(lockLabel(cfg))}.`}</span>
       </div>
       <div style="margin-top:8px"><input class="ed txt wide" ${dis(w.key)} data-cm="${esc(r.id)}" data-cw="${w.key}" data-cf="note" placeholder="${esc(tab.note_prompt || 'What do you need this week?')}" value="${esc(thisC?.note || '')}" aria-label="Note"></div>
     </div>
     <div class="card">
-      <div class="sec-h"><h2 class="s16">Branches · ${esc(w.scoreLabel.toLowerCase())}</h2><span class="sub">${esc(ratio?.sub || 'did / committed')}</span></div>
-      <div class="tw flat"><table><thead><tr><th>Branch</th>${bm.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}${ratio ? `<th class="num">${esc(ratio.label)}</th>` : ''}${crmMode ? '<th class="num">Open $</th>' : ''}</tr></thead><tbody>
+      <div class="sec-h"><h2 class="s16">${byBranch ? 'Branches' : esc(tab.team_label || 'Team')} · ${esc(w.scoreLabel.toLowerCase())}</h2><span class="sub">${esc(ratio?.sub || 'did / committed')}</span></div>
+      <div class="tw flat"><table><thead><tr><th>${byBranch ? 'Branch' : 'Rep'}</th>${bm.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}${ratio ? `<th class="num">${esc(ratio.label)}</th>` : ''}${crmMode ? '<th class="num">Open $</th>' : ''}</tr></thead><tbody>
       ${branchRows.map((x) => x.unassigned
         ? `<tr class="unas"><td><b>${x.b ? esc(x.b) : 'No branch'}</b> <span class="pill n">not on roster</span>${repLines(x.reps, 4, 'open')}</td>${bm.map((m) => `<td class="num">${x.t[m.key] ? fmtM(m, x.t[m.key].d) : '<span class="m">—</span>'}</td>`).join('')}${ratio ? '<td class="num"><span class="m">—</span></td>' : ''}<td class="num">${money(x.open)}<small class="m"> ·${x.openN}</small></td></tr>`
-        : `<tr><td><b>${esc(x.b)}</b></td>${bm.map((m) => `<td class="num">${m.auto === 'won_value' ? `<span class="dot ${ryg(x.t[m.key].d, x.t[m.key].c)}"></span> ` : ''}${fmtM(m, x.t[m.key].d)}<small class="m">/${fmtM(m, x.t[m.key].c)}</small></td>`).join('')}${ratio ? `<td class="num"><span class="dot ${ratioDot(x)}"></span> ${x.rv.toFixed(1)}</td>` : ''}${crmMode ? `<td class="num">${money(x.open)}<small class="m"> ·${x.openN}</small></td>` : ''}</tr>`).join('')}
+        : `<tr><td>${x.person ? `<span class="person">${esc(x.b)}</span>` : `<b>${esc(x.b)}</b>`}</td>${bm.map((m) => `<td class="num">${m.auto === 'won_value' ? `<span class="dot ${ryg(x.t[m.key].d, x.t[m.key].c)}"></span> ` : ''}${fmtM(m, x.t[m.key].d)}<small class="m">/${fmtM(m, x.t[m.key].c)}</small></td>`).join('')}${ratio ? `<td class="num"><span class="dot ${ratioDot(x)}"></span> ${x.rv.toFixed(1)}</td>` : ''}${crmMode ? `<td class="num">${money(x.open)}<small class="m"> ·${x.openN}</small></td>` : ''}</tr>`).join('')}
       </tbody></table></div>
-      ${branchRows.some((x) => x.unassigned) ? `<p class="note">Not on roster: deals whose ${esc(cfg.crmLabel)} rep matches nobody in Summit, by branch. Their names and open dollars sit under the branch. They show on Grow and Net New until the rep is added to the roster. Typed numbers like site audits have no one to type them, so they read —.</p>` : ''}
+      ${branchRows.some((x) => x.unassigned) ? `<p class="note">Not on roster: deals whose ${esc(cfg.crmLabel)} rep matches nobody in Summit, by branch. Their names and open dollars sit under the branch. They show on ${esc(teamTabs().map((t) => t.label).join(' and '))} until the rep is added to the roster. Typed numbers like site audits have no one to type them, so they read —.</p>` : ''}
       ${tab.branch_note ? `<p class="note">${esc(tab.branch_note)}</p>` : ''}
     </div>
   </div>
@@ -126,11 +130,11 @@ export function renderTeam(el, tab) {
         <select class="ed" data-f="${team}_stage"><option value="">${crm ? 'Status' : 'Stage'}: all</option>${cfg.stages.map((s) => `<option ${fk('stage') === s.name ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
         <select class="ed" data-f="${team}_flag"><option value="">Flag: all</option><option value="r" ${fk('flag') === 'r' ? 'selected' : ''}>Red</option><option value="y" ${fk('flag') === 'y' ? 'selected' : ''}>Yellow</option><option value="g" ${fk('flag') === 'g' ? 'selected' : ''}>Green</option></select>
         <select class="ed" data-f="${team}_all"><option value="">Focus list</option><option value="1" ${fk('all') ? 'selected' : ''}>Everything of mine</option></select>
-        ${canEdit && !crm ? `<button class="btn sm" data-add="${esc(r.id)}" data-team="${esc(team)}">+ Add account</button>` : ''}
+        ${canEdit && !crm ? `<button class="btn sm" data-add="${esc(r.id)}" data-team="${esc(team)}">+ Add ${esc(cfg.dealWord)}</button>` : ''}
       </div></div>
     ${renderGrid(rows, { canEdit: canEditOpp })}
     ${crm
-      ? `<p class="note">From ${esc(cfg.crmLabel)}, synced nightly. Change a deal in ${esc(cfg.crmLabel)} and it updates here the next morning. Focus list = everything open plus won work that has not started. Red: expected close passed, or a bid out with no start date. Yellow: a date or value missing.</p>`
+      ? `<p class="note">${esc(sourceNote())}. ${cfg.source.mode === 'csv' ? 'Read only. It changes when a leader uploads the next file.' : `Change a deal in ${esc(cfg.crmLabel)} and it updates here the next morning.`} Focus list = everything open plus won work that has not started. Red: expected close passed, or a bid out with no start date. Yellow: a date or value missing.</p>`
       : '<p class="note">Focus list = your priority accounts plus anything past the early stages or waiting to install. Star a row to pin it. Red: next step past due, no touch in 14 days, bid out with no start date. Yellow: due in 3 days or a field missing.</p>'}
   </div>`;
 }

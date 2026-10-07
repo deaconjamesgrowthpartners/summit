@@ -190,3 +190,41 @@ begin
   assert (select count(*) from deal_changes where deal_id = did and field = 'owner_member_id' and action = 'updated') = 1, 'owner change logged';
   raise notice 'csv and native checks passed';
 end $$;
+
+-- 015: the two proof workspaces are config only. The stub needs the config columns 001 and 002 give the real table.
+alter table workspaces add column if not exists brand jsonb, add column if not exists branches text[], add column if not exists categories jsonb,
+  add column if not exists measures jsonb, add column if not exists pipeline jsonb, add column if not exists crm_source text,
+  add column if not exists lock_dow int default 2;
+update workspaces set lock_dow = 3 where slug = 'elevation-outdoors';
+\i :mig15
+\i :mig15
+do $$
+declare a uuid; b uuid;
+begin
+  select id into a from workspaces where slug = '29029';
+  select id into b from workspaces where slug = 'deacon-james';
+  assert a is not null and b is not null, 'both made';
+  assert (select count(*) from workspaces where slug in ('29029', 'deacon-james')) = 2, 'once each';
+  assert (select lock_dow from workspaces where id = a) = 3, 'settings copied from Elevation';
+  assert (select mode from deal_sources where workspace_id = a) = 'native' and (select mode from deal_sources where workspace_id = b) = 'native', 'native';
+  assert (select count(*) from members where workspace_id = a) = 3, 'Joe and two viewers, once';
+  assert (select string_agg(role, ',' order by role) from members where workspace_id = a) = 'rep,viewer,viewer', 'roles';
+  assert (select count(*) from members where workspace_id = a and active and email like '%.invalid') = 0, 'placeholders never active';
+  assert (select jsonb_array_length(measures) from workspaces where id = a) = 5, 'five measures';
+  assert (select measures->1->'auto'->>'stage_entered' from workspaces where id = a) = 'Meeting booked', 'booked from the deals';
+  assert (select tabs->2->>'team' || '/' || (tabs->3->'measures'->>0) from workspaces where id = b) = 'pipeline/src_booked', 'two teams, two measure sets';
+  assert (select crm_source from workspaces where slug = 'elevation-outdoors') = 'aspire', 'Elevation untouched';
+  raise notice 'workspace checks passed';
+end $$;
+
+-- 016: the nightly job moves to source-sync, one job per connected source, the old one gone
+select cron.schedule('aspire-sync-nightly', '17 7 * * *', 'select 1') where not exists (select 1 from cron.job where jobname = 'aspire-sync-nightly');
+\i :mig16
+\i :mig16
+do $$
+begin
+  assert not exists (select 1 from cron.job where jobname = 'aspire-sync-nightly'), 'old job gone';
+  assert (select count(*) from cron.job where jobname like 'source-sync-%') = (select count(*) from deal_sources where mode = 'connected' and enabled and schedule is not null), 'one job per connected source';
+  assert (select command from cron.job where jobname like 'source-sync-%' limit 1) like 'select source_sync_now(%', 'calls source_sync_now';
+  raise notice 'cutover checks passed';
+end $$;

@@ -1,10 +1,11 @@
-import { S, wk, goals, isLeader, scopeLabel, oppsScoped, oppsAll, repsScoped, commitFor, memberById, repOf, fromCrm, branchList, tabFor } from '../data/store.js';
+import { S, wk, goals, isLeader, scopeLabel, oppsScoped, oppsAll, repsScoped, commitFor, memberById, repOf, fromCrm, branchList, tabFor, byBranch } from '../data/store.js';
 import { monthLabel, monthEnd } from '../lib/period.js';
 import { addDays } from '../lib/format.js';
 import { esc, money, fmtDate } from '../lib/format.js';
 import { lockLabel } from '../lib/time.js';
 import { goalFields } from '../data/workspace.js';
 import { rowIssues, flag, isUnknown, isOpen } from '../lib/rules.js';
+import { uploadCard } from './upload.js';
 
 export function renderCheck(el) {
   const cfg = S.cfg, w = wk(), g = goals(), leader = isLeader();
@@ -26,7 +27,7 @@ export function renderCheck(el) {
   <div class="split">
     <div>
       ${order.length ? order.map((t) => { const gr = groups[t]; return `<div class="card mb"><div class="sec-h"><h2 class="s15">${esc(t)}</h2><span class="pill ${gr.sev}">${gr.rows.length}</span></div>
-        ${gr.rows.slice(0, 25).map(({ o }) => `<div class="issue"><span class="dot ${flag(cfg, o, w.today, S.crm)}"></span><div class="what"><b>${esc(o.account)}</b> <small>${esc(repOf(o) || 'no rep')} · ${esc(o.branch)} · ${esc(o.stage || o.status_name || 'no status')} · ${money(o.value)}${o.src === 'aspire' ? ` · ${esc(S.cfg.crmLabel)} #${esc(o.crm_ref)}` : ''}</small></div><button class="btn sm sec" data-open="${esc(o.id)}">Open row</button></div>`).join('')}
+        ${gr.rows.slice(0, 25).map(({ o }) => `<div class="issue"><span class="dot ${flag(cfg, o, w.today, S.crm)}"></span><div class="what"><b>${esc(o.account)}</b> <small>${esc(repOf(o) || 'no rep')}${o.branch ? ` · ${esc(o.branch)}` : ''} · ${esc(o.stage || o.status_name || 'no status')} · ${money(o.value)}${o.readOnly ? ` · ${esc(S.cfg.crmLabel)} #${esc(o.crm_ref)}` : ''}</small></div><button class="btn sm sec" data-open="${esc(o.id)}">Open row</button></div>`).join('')}
         ${gr.rows.length > 25 ? `<div class="note">and ${gr.rows.length - 25} more</div>` : ''}</div>`; }).join('') : '<div class="card empty mb">Zero board. Nice.</div>'}
       ${late.length ? `<div class="card mb"><div class="sec-h"><h2 class="s15">Changed after the lock</h2><span class="pill y">${late.length}</span></div>
         ${late.map((c) => `<div class="issue"><div class="what"><span class="person">${esc(memberById(c.member_id)?.full_name || '')}</span><small>week ending ${fmtDate(c.week_key)} · edited ${esc(new Date(c.updated_at || c.submitted_at || Date.now()).toLocaleString('en-US', { timeZone: cfg.lock_tz }))}</small></div>${leader ? `<button class="btn sm sec" data-accept="${esc(c.id)}">Accept</button>` : ''}</div>`).join('')}</div>` : ''}
@@ -34,8 +35,10 @@ export function renderCheck(el) {
     <div>
       <div class="card mb"><h2 class="s15" style="margin-bottom:8px">Commits not in · week ending ${fmtDate(w.key)}</h2>
         ${missing.length ? missing.map((r) => `<div class="kv"><span class="person">${esc(r.full_name)}</span><span class="pill n">${w.locked ? 'not in' : `due ${esc(lock)}`}</span></div>`).join('') : '<div class="kv"><span>Everyone is in.</span><span class="pill g">all in</span></div>'}</div>
+      ${uploadCard(cfg)}
       ${syncCard(cfg)}
-      ${fromCrm() ? '' : `<div class="card mb"><h2 class="s15" style="margin-bottom:6px">${esc(cfg.crmLabel)} cross-check</h2>
+      ${changesCard(cfg)}
+      ${!cfg.crossCheck ? '' : `<div class="card mb"><h2 class="s15" style="margin-bottom:6px">${esc(cfg.crmLabel)} cross-check</h2>
         <p class="help">Paste the ${esc(cfg.crmLabel)} export (tab or comma separated: id, status, estimated $). Rows with a matching ${esc(cfg.crmLabel)} # get compared. Nothing is saved or sent. It stays in this browser tab.</p>
         <textarea class="paste" id="crmPaste" placeholder="Id&#9;Status&#9;Est $&#10;4471&#9;Proposed&#9;14200" aria-label="${esc(cfg.crmLabel)} export"></textarea>
         <div class="row-actions"><button class="btn sm" data-crm>Compare</button>${S.crm ? `<span class="pill g">${Object.keys(S.crm).length} rows loaded</span> <button class="lnk" data-crm-clear>clear</button>` : ''}</div>
@@ -53,28 +56,33 @@ export function renderCheck(el) {
   </div>`;
 }
 
-// The Aspire sync: the last run, the ones before it, and the Aspire names nobody on the roster matches.
-// Color goes on the status and the counts, never on a name.
+// The sync or the uploads: the last run, the ones before it, and the source's rep names nobody on the roster
+// matches. Color goes on the status and the counts, never on a name.
 const RUN_PILL = { ok: ['g', 'synced'], partial: ['y', 'partial'], error: ['r', 'failed'], running: ['n', 'running'] };
 function syncCard(cfg) {
   const sy = S.sync;
-  if (cfg.crmSource !== 'aspire' && !sy?.runs?.length) return '';
+  if (cfg.source.mode === 'native') return '';
+  const csv = cfg.source.mode === 'csv';
   const when = (t) => (t ? new Date(t).toLocaleString('en-US', { timeZone: cfg.lock_tz, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
   const pill = (st) => { const [c, l] = RUN_PILL[st] || ['n', st]; return `<span class="pill ${c}">${esc(l)}</span>`; };
   const changed = (r) => (r.rows_inserted || 0) + (r.rows_updated || 0);
   const runs = sy?.runs || [];
   const last = runs[0];
   const um = sy?.unmatched || [];
-  const btn = S.admin ? `<div class="row-actions"><button class="btn sm" data-sync ${S.syncing ? 'disabled' : ''}>${S.syncing ? 'Syncing...' : 'Run sync now'}</button><button class="lnk" data-sync="full" ${S.syncing ? 'disabled' : ''}>full re-pull</button></div>` : '';
-  return `<div class="card mb"><div class="sec-h"><h2 class="s15">${esc(cfg.crmLabel)} sync</h2>${last ? pill(last.status) : '<span class="pill n">not run yet</span>'}</div>
-    ${last ? `<p class="help">Last run ${esc(when(last.started_at))} · ${esc(last.mode)} · ${esc(last.trigger)}. ${last.rows_pulled} pulled, ${changed(last)} changed${last.rows_removed ? `, ${last.rows_removed} gone from ${esc(cfg.crmLabel)}` : ''}.</p>` : `<p class="help">Runs nightly. Nothing has synced yet.</p>`}
+  const btn = S.admin && !csv ? `<div class="row-actions"><button class="btn sm" data-sync ${S.syncing ? 'disabled' : ''}>${S.syncing ? 'Syncing...' : 'Run sync now'}</button><button class="lnk" data-sync="full" ${S.syncing ? 'disabled' : ''}>full re-pull</button></div>` : '';
+  const who = (r) => (r.run_by ? S.members.find((m) => m.user_id === r.run_by)?.full_name || '' : '');
+  return `<div class="card mb"><div class="sec-h"><h2 class="s15">${esc(csv ? `${cfg.source.label} uploads` : `${cfg.crmLabel} sync`)}</h2>${last ? pill(last.status) : `<span class="pill n">${csv ? 'nothing uploaded yet' : 'not run yet'}</span>`}</div>
+    ${last ? (csv
+      ? `<p class="help">Last upload ${esc(when(last.started_at))}${last.file_name ? ` · ${esc(last.file_name)}` : ''}${who(last) ? ` · ${esc(who(last))}` : ''}. ${last.rows_pulled} rows, ${last.rows_inserted || 0} added, ${last.rows_updated || 0} changed${last.rows_removed ? `, ${last.rows_removed} removed by a leader` : ''}.</p>`
+      : `<p class="help">Last run ${esc(when(last.started_at))} · ${esc(last.mode)} · ${esc(last.trigger)}. ${last.rows_pulled} pulled, ${changed(last)} changed${last.rows_removed ? `, ${last.rows_removed} gone from ${esc(cfg.crmLabel)}` : ''}.</p>`)
+      : `<p class="help">${csv ? 'A leader uploads a file on Data Check. Deals are read only between uploads.' : 'Runs nightly. Nothing has synced yet.'}</p>`}
     ${last?.errors?.length ? last.errors.map((e) => `<div class="issue"><span class="dot r"></span><div class="what"><small>${esc(e)}</small></div></div>`).join('') : ''}
-    ${last?.notes?.filter((n) => !/^(full pull|incremental:)/.test(n)).map((n) => `<p class="note">${esc(n)}</p>`).join('') || ''}
+    ${last?.notes?.filter((n) => !/^(full pull|incremental:|upload:)/.test(n)).map((n) => `<p class="note">${esc(n)}</p>`).join('') || ''}
     ${um.length ? `<h3 style="font-size:13px;margin:12px 0 4px">Not on the roster <span class="pill y">${um.length}</span></h3>
       <p class="help">These ${esc(cfg.crmLabel)} reps match nobody in Summit. Their deals still show, as unassigned. Add them to the roster, or put their ${esc(cfg.crmLabel)} spelling in crm_name.</p>
       ${um.map((u) => `<div class="kv"><span>${esc(u.sales_rep_name)}</span><span><span class="pill y">${u.open_deals} open</span> <small>${money(u.open_estimated)} · ${u.deals} deals</small></span></div>`).join('')}` : last ? '<div class="kv"><span>Every rep matches the roster.</span><span class="pill g">all matched</span></div>' : ''}
     ${mapCheck(cfg)}
-    ${runs.length > 1 ? `<h3 style="font-size:13px;margin:12px 0 4px">Earlier runs</h3>${runs.slice(1).map((r) => `<div class="kv"><span><small>${esc(when(r.started_at))} · ${esc(r.mode)}</small></span><span><small>${r.rows_pulled} pulled · ${changed(r)} changed</small> ${pill(r.status)}</span></div>`).join('')}` : ''}
+    ${runs.length > 1 ? `<h3 style="font-size:13px;margin:12px 0 4px">Earlier ${csv ? 'uploads' : 'runs'}</h3>${runs.slice(1).map((r) => `<div class="kv"><span><small>${esc(when(r.started_at))} · ${esc(csv ? r.file_name || 'file' : r.mode)}</small></span><span><small>${r.rows_pulled} pulled · ${changed(r)} changed</small> ${pill(r.status)}</span></div>`).join('')}` : ''}
     ${btn}
   </div>`;
 }
@@ -107,8 +115,8 @@ function mapCheck(cfg) {
 // branch, for All, Maintenance and Install. The table can hold Enhancement / Net New too; this
 // editor leaves them out on purpose. Blank means no target, and the tile says "no target set".
 const T_METRICS = [['closed', 'Closed contracts'], ['created', 'Pipeline created'], ['forecast', 'Forecast']];
-const T_DIVS = [['all', 'All'], ['maintenance', 'Maintenance'], ['install', 'Install']];
 function targetsCard(cfg, w) {
+  const T_DIVS = cfg.filters.includes('division') ? [['all', 'All'], ['maintenance', cfg.words.maintenance], ['install', cfg.words.install]] : [['all', 'Target']];
   const months = [];
   for (let m = `${w.year}-01-01`, i = 0; i < 15; i++, m = addDays(monthEnd(m), 1)) months.push(m);
   const cur = `${w.today.slice(0, 7)}-01`;
@@ -118,7 +126,7 @@ function targetsCard(cfg, w) {
     const t = (S.targets || []).find((x) => x.branch === branch && x.month === month && x.metric === metric && x.division === division && x.kind === 'all');
     return t ? Math.round(+t.amount) : '';
   };
-  const rows = [['', 'Company'], ...branchList().map((b) => [b, b])];
+  const rows = [['', 'Company'], ...(byBranch() ? branchList().map((b) => [b, b]) : [])];
   return `<div class="card mb tgt"><h2 class="s15" style="margin-bottom:6px">Summit targets (leadership)</h2>
     <div class="bar"><select class="ed" data-f="tgt_month" aria-label="Month">${months.map((m) => `<option value="${m}" ${m === month ? 'selected' : ''}>${esc(monthLabel(m))}</option>`).join('')}</select>
       <select class="ed" data-f="tgt_metric" aria-label="Tile">${T_METRICS.map(([k, l]) => `<option value="${k}" ${k === metric ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
@@ -126,5 +134,22 @@ function targetsCard(cfg, w) {
     ${rows.map(([b, l]) => `<tr><td>${esc(l)}</td>${T_DIVS.map(([d, dl]) => `<td class="num"><input class="ed num" inputmode="decimal" placeholder="$" data-tgt="${esc(b)}|${month}|${metric}|${d}" value="${val(b, d)}" aria-label="${esc(`${l} ${dl} ${monthLabel(month)}`)}"></td>`).join('')}</tr>`).join('')}
     </tbody></table></div>
     <p class="note">Monthly. Quarter and Year add up the months, and Week takes its share of the month by days. A company number wins over the branches for that month; leave it blank and the tile adds up the branches.</p>
+  </div>`;
+}
+
+// typed deals: the latest changes, who made them and when. Every change is logged; this is the tail of it.
+const FIELD_WORDS = { stage: 'stage', value_estimated: 'value', value_won: 'won $', owner_member_id: 'rep', account: 'account', account_id: 'account',
+  close_date: 'expected close', start_date: 'start', won_date: 'won date', lost_date: 'lost date', next_step: 'next step', next_step_date: 'next step due',
+  notes: 'notes', priority: 'priority', installed: 'installed', category: 'type', bid_date: 'bid date', last_activity: 'last touch', contact: 'contact' };
+function changesCard(cfg) {
+  if (cfg.source.mode !== 'native' || S.dealShape !== 'board') return '';
+  // a new deal logs every field it was made with. One line for it here.
+  const rows = (S.changes || []).filter((c) => (c.action !== 'created' || c.field === 'account') && !['account_id', 'last_activity', 'stage_date'].includes(c.field)).slice(0, 15);
+  const deal = (c) => S.opps[c.deal_id]?.account || (c.action === 'deleted' ? c.old_value : '') || 'a deal';
+  const val = (c, v) => (c.field === 'owner_member_id' ? memberById(v)?.full_name || '' : v ?? '');
+  const when = (t) => new Date(t).toLocaleString('en-US', { timeZone: cfg.lock_tz, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return `<div class="card mb"><div class="sec-h"><h2 class="s15">Latest changes</h2><span class="pill n">every change is logged</span></div>
+    ${rows.length ? rows.map((c) => `<div class="kv"><span><b>${esc(deal(c))}</b> <small>${c.action === 'created' ? 'added' : c.action === 'deleted' ? 'deleted' : `${esc(FIELD_WORDS[c.field] || c.field)}: ${esc(val(c, c.old_value) || 'blank')} → ${esc(val(c, c.new_value) || 'blank')}`}</small></span><small class="m">${esc(memberById(c.member_id)?.full_name || '')} · ${esc(when(c.changed_at))}</small></div>`).join('')
+      : '<p class="help">Nothing changed yet. Add a deal on a team tab or All Accounts.</p>'}
   </div>`;
 }

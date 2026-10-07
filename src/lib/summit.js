@@ -84,3 +84,27 @@ export function repBreakdown(rows, val = est) {
   }
   return [...by.values()].sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
 }
+
+// without branches, every deal lands on its rep's row, or one row for deals with no rep. Same shape as
+// branchGroups, so the table and the drill-down read it the same way. The rows add up to the tile.
+export function repGroups(rows, reps) {
+  const out = reps.map((r) => ({ key: `m:${r.id}`, branch: r.full_name, person: true, unassigned: false, rows: rows.filter((o) => o.owner_member_id === r.id) }));
+  const ids = new Set(reps.map((r) => r.id));
+  const rest = rows.filter((o) => !ids.has(o.owner_member_id));
+  if (rest.length) out.push({ key: 'm:', branch: '', person: false, unassigned: true, rows: rest });
+  return out;
+}
+
+// typed deals whose stage moved forward inside the period, from their stage history. A move to a lost stage
+// is not forward. The first stage a deal was created at is not a move.
+export function advancedIn(cfg, rows, p) {
+  const idx = (n) => cfg.stages.findIndex((s) => s.name === n);
+  return rows.filter((o) => {
+    const ev = [...(o.stage_events || [])].sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
+    for (let i = 1; i < ev.length; i++) {
+      const s = cfg.stages[idx(ev[i].stage)];
+      if (s && s.status !== 'lost' && idx(ev[i].stage) > idx(ev[i - 1].stage) && inPeriod(ev[i].d, p)) return true;
+    }
+    return false;
+  });
+}

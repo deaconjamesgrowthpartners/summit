@@ -1,6 +1,6 @@
-import { S, wk, scopeLabel, repsScoped, commitFor, oppsAll, teamTabs, fromCrm } from '../data/store.js';
+import { S, wk, scopeLabel, repsScoped, commitFor, oppsAll, teamTabs, fromCrm, byBranch as splitByBranch } from '../data/store.js';
 import { esc, money, fmtDate, pct, addDays } from '../lib/format.js';
-import { mLabel } from '../data/workspace.js';
+import { mLabel, teamMeasures } from '../data/workspace.js';
 import { lockLabel } from '../lib/time.js';
 import { ryg, autoDid, didValue, comValue, isBidMeasure, bidsIn, bidNote } from '../lib/rules.js';
 import { periodRange, weeksIn } from '../lib/period.js';
@@ -51,12 +51,13 @@ export function renderClimb(el) {
   const teams = teamTabs().map((t) => {
     const rr = RS.filter((r) => r.team === t.team);
     if (!rr.length) return '';
+    const ms = teamMeasures(cfg, t.team), br = splitByBranch();
     return `
     <div class="sec"><div class="sec-h"><h2 class="s16">${esc(t.title || t.label)}${t.team_label ? ' · ' + esc(t.team_label) : ''}</h2><span class="sub">${single ? (w.locked ? 'this week did / committed · locked' : 'last week did / committed · this week committed') : `${esc(p.label)} did / committed`}</span></div>
-    <div class="tw"><table><thead><tr><th>Rep</th><th>Branch</th>${cfg.measures.map((m) => `<th class="num">${esc(mLabel(m, t.team))}</th>`).join('')}<th>This week</th></tr></thead><tbody>
+    <div class="tw"><table><thead><tr><th>Rep</th>${br ? '<th>Branch</th>' : ''}${ms.map((m) => `<th class="num">${esc(mLabel(m, t.team))}</th>`).join('')}<th>This week</th></tr></thead><tbody>
     ${rr.map((r) => {
       const sc = score.get(r.id), tc = commitFor(r.id, w.key);
-      return `<tr><td><span class="person">${esc(r.full_name)}</span></td><td>${esc(r.branch)}</td>${cfg.measures.map((m) => {
+      return `<tr><td><span class="person">${esc(r.full_name)}</span></td>${br ? `<td>${esc(r.branch || '')}</td>` : ''}${ms.map((m) => {
         const com = sc[m.key].c, did = sc[m.key].d, tcv = comValue(tc, m.key);
         return `<td class="num"><span class="dot ${sc.any ? ryg(did, com) : 'n'}"></span> ${fmtM(m, did)}<small class="m">/${fmtM(m, com)}</small>${single && !w.locked ? `<br><small class="i">→ ${fmtM(m, tcv)}</small>` : ''}</td>`;
       }).join('')}<td>${commitPill(tc, w.locked)}</td></tr>`;
