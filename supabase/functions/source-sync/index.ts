@@ -1,22 +1,24 @@
-// aspire-sync: Aspire opportunities into Summit's aspire_opps. Reads Aspire, never writes to it.
-// Writes only aspire_opps and aspire_sync_runs, through the SQL functions in migration 007.
+// source-sync: a connected source into Summit's deals. Reads the source, never writes to it.
+// Writes only deals, deal_snapshots and source_runs, through the SQL functions in migration 012.
 //
 // Who may run it: the same gate as aspire-probe. The service role key (what the nightly pg_cron
 // job sends), a service_role JWT that Supabase confirms, or a Summit admin. Anyone else gets 403.
 //
 // Body (all optional):
-//   {"full": true}           re-pull everything instead of ModifiedDate since the last good run
-//   {"workspace": "<slug>"}  only needed if more than one workspace has crm_source = 'aspire'
+//   {"source": 3}            the deal_sources id. Without it: {"workspace": "<slug>"}, else the only connected source
+//   {"full": true}           re-pull everything instead of changes since the last good run
 //   {"trigger": "cron"}      a label for the log
-//   {"pageSize": 200}        records per Aspire page and per write to Summit. Default 200, max 1000
+//   {"pageSize": 200}        records per page and per write to Summit. Default 200, max 1000
 //
-// Deploy:  paste supabase/dashboard/aspire-sync.ts into the dashboard editor as "aspire-sync"
-//          or: supabase functions deploy aspire-sync --project-ref tyrtzxnhwjchtemytfxv
-// Secrets: ASPIRE_CLIENT_ID, ASPIRE_CLIENT_SECRET (already set). Optional ASPIRE_BASE_URL,
-//          ASPIRE_SYNC_SECONDS (time budget, default 120. The free plan cuts off at 150).
+// Connectors built: aspire. Credentials come by reference (deal_sources.credential_ref), never stored in Summit:
+//   env:ASPIRE  ->  ASPIRE_CLIENT_ID, ASPIRE_CLIENT_SECRET (already set), optional ASPIRE_BASE_URL.
+// Optional SYNC_SECONDS (time budget, default 120. The free plan cuts off at 150).
+//
+// Deploy:  paste supabase/dashboard/source-sync.ts into the dashboard editor as "source-sync"
+//          or: supabase functions deploy source-sync --project-ref tyrtzxnhwjchtemytfxv
 
 import { authorize } from '../aspire-probe/gate.ts';
-import { runSync, restDb } from './sync.ts';
+import { runSync, restDb, aspireConnector, envCredentials } from './sync.ts';
 
 const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body, null, 2), { status, headers: { 'Content-Type': 'application/json' } });
@@ -28,17 +30,18 @@ Deno.serve(async (req) => {
   });
   if (!gate.ok) return reply({ error: 'not allowed: none of the three checks passed', checks: gate.checks }, 403);
 
-  const clientId = env('ASPIRE_CLIENT_ID'), secret = env('ASPIRE_CLIENT_SECRET');
   const url = env('SUPABASE_URL'), key = env('SUPABASE_SERVICE_ROLE_KEY');
-  if (!clientId || !secret) return reply({ error: 'ASPIRE_CLIENT_ID and ASPIRE_CLIENT_SECRET must both be set as function secrets' }, 500);
   if (!url || !key) return reply({ error: 'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not available to this function' }, 500);
 
   let body: any = {};
   try { body = (await req.json()) || {}; } catch { /* empty body */ }
-  const secs = Number(env('ASPIRE_SYNC_SECONDS'));
+  const secs = Number(env('SYNC_SECONDS') || env('ASPIRE_SYNC_SECONDS'));
+  const deadlineMs = (Number.isFinite(secs) && secs > 0 ? secs : 120) * 1000;
   const result = await runSync({
-    aspire: { clientId, secret, base: env('ASPIRE_BASE_URL') || undefined, deadlineMs: (Number.isFinite(secs) && secs > 0 ? secs : 120) * 1000 },
     db: restDb(url, key),
+    connectors: { aspire: aspireConnector({ deadlineMs }) },
+    credentials: envCredentials(env),
+    source: Number.isInteger(body.source) ? body.source : null,
     workspace: typeof body.workspace === 'string' ? body.workspace : null,
     full: body.full === true,
     trigger: body.trigger === 'cron' ? 'cron' : 'manual',

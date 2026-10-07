@@ -8,7 +8,7 @@ const ANY_IMPORT = /^import .*$/gm;
 // in dependency order. a path outside the function's own folder is shared source.
 export const FUNCTIONS = {
   'aspire-probe': ['client.ts', 'probe.ts', 'probe2.ts', 'probe3.ts', 'gate.ts', 'index.ts'],
-  'aspire-sync': ['../aspire-probe/gate.ts', 'aspire.ts', 'sync.ts', 'index.ts'],
+  'source-sync': ['../aspire-probe/gate.ts', 'aspire.ts', 'sync.ts', 'index.ts'],
 };
 
 export function bundle(name = 'aspire-probe') {
