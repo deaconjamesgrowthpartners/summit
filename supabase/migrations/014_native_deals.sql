@@ -15,6 +15,19 @@
 
 begin;
 
+-- Never redefine a function this migration did not make. Production has functions from before this repo
+-- (summit_member_id is one), and create or replace would quietly change what their policies do.
+-- A name taken by anything not tagged 'summit 014' stops the run here, before anything changes.
+do $$
+declare clash text;
+begin
+  select string_agg(p.oid::regprocedure::text, ', ') into clash
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = any (array['deal_writable', 'deal_ws_today', 'deal_guard', 'deal_log', 'deal_stage_snapshot', 'workspace_default_source'])
+     and coalesce(obj_description(p.oid, 'pg_proc'), '') not like 'summit 014%';
+  if clash is not null then raise exception 'these functions already exist and are not from 014: %. Nothing changed. Send this to Claude.', clash; end if;
+end $$;
+
 -- ============================================================
 -- 1. ROLES AND TEAMS
 -- ============================================================
@@ -56,7 +69,7 @@ end $$;
 create or replace function deal_writable(p_ws uuid, p_owner uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from deal_sources s where s.workspace_id = p_ws and s.mode = 'native' and s.enabled)
-     and (summit_can_lead(p_ws) or (summit_member_role(p_ws) = 'rep' and p_owner is not null and p_owner = summit_member_id(p_ws))) $$;
+     and (deal_ws_can_lead(p_ws) or (deal_ws_role(p_ws) = 'rep' and p_owner is not null and p_owner = deal_ws_member(p_ws))) $$;
 revoke execute on function deal_writable(uuid, uuid) from public, anon;
 grant execute on function deal_writable(uuid, uuid) to authenticated, service_role;
 
@@ -72,11 +85,11 @@ create policy deal_accounts_read on deal_accounts for select to authenticated us
 drop policy if exists deal_accounts_add on deal_accounts;
 create policy deal_accounts_add on deal_accounts for insert to authenticated with check (
   exists (select 1 from deal_sources s where s.workspace_id = deal_accounts.workspace_id and s.mode = 'native')
-  and summit_member_role(workspace_id) in ('admin', 'leader', 'rep'));
+  and deal_ws_role(workspace_id) in ('admin', 'leader', 'rep'));
 drop policy if exists deal_accounts_edit on deal_accounts;
-create policy deal_accounts_edit on deal_accounts for update to authenticated using (summit_can_lead(workspace_id)) with check (summit_can_lead(workspace_id));
+create policy deal_accounts_edit on deal_accounts for update to authenticated using (deal_ws_can_lead(workspace_id)) with check (deal_ws_can_lead(workspace_id));
 drop policy if exists deal_accounts_drop on deal_accounts;
-create policy deal_accounts_drop on deal_accounts for delete to authenticated using (summit_can_lead(workspace_id));
+create policy deal_accounts_drop on deal_accounts for delete to authenticated using (deal_ws_can_lead(workspace_id));
 
 -- ============================================================
 -- 3. WRITING DEALS
@@ -90,10 +103,10 @@ create policy deals_edit on deals for update to authenticated
   using (deal_writable(workspace_id, owner_member_id)) with check (deal_writable(workspace_id, owner_member_id));
 drop policy if exists deals_drop on deals;
 create policy deals_drop on deals for delete to authenticated using (
-  summit_can_lead(workspace_id) and exists (select 1 from deal_sources s where s.workspace_id = deals.workspace_id and s.mode = 'native'));
+  deal_ws_can_lead(workspace_id) and exists (select 1 from deal_sources s where s.workspace_id = deals.workspace_id and s.mode = 'native'));
 
 -- today in the workspace's clock
-create or replace function summit_today(p_ws uuid) returns date
+create or replace function deal_ws_today(p_ws uuid) returns date
 language sql stable security definer set search_path = public as $$
   select (now() at time zone coalesce((select nullif(to_jsonb(w) ->> 'lock_tz', '') from workspaces w where w.id = p_ws), 'America/New_York'))::date $$;
 
@@ -109,7 +122,7 @@ begin
     select s.label into lbl from deal_sources s where s.workspace_id = new.workspace_id;
     raise exception 'Deals here come from %. Change them there.', coalesce(lbl, 'another system') using errcode = '42501';
   end if;
-  d := summit_today(new.workspace_id);
+  d := deal_ws_today(new.workspace_id);
   if tg_op = 'INSERT' then
     new.source_id := sid; new.external_id := null; new.raw := null; new.removed_at := null;
     new.seen_run := null; new.seen_at := null; new.rep_name := null;
@@ -168,8 +181,8 @@ begin
   if current_setting('summit.no_log', true) = 'on' then return null; end if;
   r := case when tg_op = 'DELETE' then old else new end;
   if not exists (select 1 from deal_sources s where s.id = r.source_id and s.mode = 'native') then return null; end if;
-  d := summit_today(r.workspace_id);
-  mid := case when who is not null then summit_member_id(r.workspace_id) end;
+  d := deal_ws_today(r.workspace_id);
+  mid := case when who is not null then deal_ws_member(r.workspace_id) end;
   act := case tg_op when 'INSERT' then 'created' when 'UPDATE' then 'updated' else 'deleted' end;
   o := case when tg_op = 'INSERT' then '{}'::jsonb else to_jsonb(old) end;
   n := case when tg_op = 'DELETE' then '{}'::jsonb else to_jsonb(new) end;
@@ -199,7 +212,7 @@ begin
   if tg_op = 'UPDATE' and new.stage is not distinct from old.stage and new.value_estimated is not distinct from old.value_estimated
      and new.value_won is not distinct from old.value_won then return null; end if;
   insert into deal_snapshots as t (deal_id, workspace_id, snap_date, stage, value_estimated, value_won)
-  values (new.id, new.workspace_id, summit_today(new.workspace_id), new.stage, new.value_estimated, new.value_won)
+  values (new.id, new.workspace_id, deal_ws_today(new.workspace_id), new.stage, new.value_estimated, new.value_won)
   on conflict (deal_id, snap_date) do update set stage = excluded.stage, value_estimated = excluded.value_estimated,
     value_won = excluded.value_won, recorded_at = now();
   return null;
@@ -207,8 +220,8 @@ end $$;
 drop trigger if exists deal_stage_snapshot on deals;
 create trigger deal_stage_snapshot after insert or update on deals for each row execute function deal_stage_snapshot();
 
-revoke execute on function deal_guard(), deal_log(), deal_stage_snapshot(), summit_today(uuid) from public, anon;
-grant execute on function deal_guard(), summit_today(uuid) to authenticated;
+revoke execute on function deal_guard(), deal_log(), deal_stage_snapshot(), deal_ws_today(uuid) from public, anon;
+grant execute on function deal_guard(), deal_ws_today(uuid) to authenticated;
 revoke execute on function deal_log(), deal_stage_snapshot() from authenticated;
 
 -- a workspace made after 012 starts native. Make it connected or csv by updating its source.
@@ -251,7 +264,7 @@ begin
 end $$;
 -- the first snapshot for what was copied, so their stages count from today
 insert into deal_snapshots (deal_id, workspace_id, snap_date, stage, value_estimated, value_won)
-select d.id, d.workspace_id, summit_today(d.workspace_id), d.stage, d.value_estimated, d.value_won
+select d.id, d.workspace_id, deal_ws_today(d.workspace_id), d.stage, d.value_estimated, d.value_won
   from deals d join deal_sources s on s.id = d.source_id and s.mode = 'native'
  where d.removed_at is null
 on conflict (deal_id, snap_date) do nothing;
@@ -272,6 +285,15 @@ begin
     end loop;
   end if;
 end $$;
+
+
+-- tag what this migration owns, so a re-run knows them and the guard above knows what is not
+comment on function deal_writable(uuid, uuid) is 'summit 014';
+comment on function deal_ws_today(uuid) is 'summit 014';
+comment on function deal_guard() is 'summit 014';
+comment on function deal_log() is 'summit 014';
+comment on function deal_stage_snapshot() is 'summit 014';
+comment on function workspace_default_source() is 'summit 014';
 
 commit;
 

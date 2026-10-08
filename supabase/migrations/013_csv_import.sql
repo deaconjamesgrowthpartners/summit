@@ -12,12 +12,25 @@
 
 begin;
 
+-- Never redefine a function this migration did not make. Production has functions from before this repo
+-- (summit_member_id is one), and create or replace would quietly change what their policies do.
+-- A name taken by anything not tagged 'summit 013' stops the run here, before anything changes.
+do $$
+declare clash text;
+begin
+  select string_agg(p.oid::regprocedure::text, ', ') into clash
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = any (array['deal_ws_role', 'deal_ws_member', 'deal_ws_can_lead', 'source_mapped_fields', 'csv_source_for', 'csv_import_preview', 'csv_import_apply'])
+     and coalesce(obj_description(p.oid, 'pg_proc'), '') not like 'summit 013%';
+  if clash is not null then raise exception 'these functions already exist and are not from 013: %. Nothing changed. Send this to Claude.', clash; end if;
+end $$;
+
 -- ============================================================
 -- 1. WHO YOU ARE IN A WORKSPACE
 -- ============================================================
 
 -- admin, leader, rep, viewer, or null. An admin is anyone on app_admins.
-create or replace function summit_member_role(p_ws uuid) returns text
+create or replace function deal_ws_role(p_ws uuid) returns text
 language sql stable security definer set search_path = public as $$
   select case when exists (select 1 from app_admins a where a.user_id = auth.uid()) then 'admin'
     else (select m.role from members m
@@ -26,19 +39,19 @@ language sql stable security definer set search_path = public as $$
            limit 1) end $$;
 
 -- my roster row in a workspace
-create or replace function summit_member_id(p_ws uuid) returns uuid
+create or replace function deal_ws_member(p_ws uuid) returns uuid
 language sql stable security definer set search_path = public as $$
   select m.id from members m
    where m.workspace_id = p_ws and m.user_id = auth.uid() and m.active
    order by case m.role when 'leader' then 0 when 'rep' then 1 else 2 end, m.id
    limit 1 $$;
 
-create or replace function summit_can_lead(p_ws uuid) returns boolean
+create or replace function deal_ws_can_lead(p_ws uuid) returns boolean
 language sql stable security definer set search_path = public as $$
-  select coalesce(summit_member_role(p_ws) in ('admin', 'leader'), false) $$;
+  select coalesce(deal_ws_role(p_ws) in ('admin', 'leader'), false) $$;
 
-revoke execute on function summit_member_role(uuid), summit_member_id(uuid), summit_can_lead(uuid) from public, anon;
-grant execute on function summit_member_role(uuid), summit_member_id(uuid), summit_can_lead(uuid) to authenticated, service_role;
+revoke execute on function deal_ws_role(uuid), deal_ws_member(uuid), deal_ws_can_lead(uuid) from public, anon;
+grant execute on function deal_ws_role(uuid), deal_ws_member(uuid), deal_ws_can_lead(uuid) to authenticated, service_role;
 
 -- ============================================================
 -- 2. PREVIEW. Writes nothing.
@@ -55,7 +68,7 @@ create or replace function csv_source_for(p_ws uuid) returns deal_sources
 language plpgsql stable security definer set search_path = public as $$
 declare s deal_sources;
 begin
-  if not summit_can_lead(p_ws) then raise exception 'Only a leader can upload deals' using errcode = '42501'; end if;
+  if not deal_ws_can_lead(p_ws) then raise exception 'Only a leader can upload deals' using errcode = '42501'; end if;
   select * into s from deal_sources where workspace_id = p_ws;
   if s.id is null then raise exception 'This workspace has no deal source yet'; end if;
   if s.mode <> 'csv' then raise exception 'This workspace gets its deals from %, not a file upload', s.label; end if;
@@ -153,5 +166,15 @@ end $$;
 revoke execute on function source_mapped_fields(jsonb), csv_source_for(uuid) from public, anon, authenticated;
 revoke execute on function csv_import_preview(uuid, jsonb, jsonb), csv_import_apply(uuid, jsonb, text[], text, jsonb) from public, anon;
 grant execute on function csv_import_preview(uuid, jsonb, jsonb), csv_import_apply(uuid, jsonb, text[], text, jsonb) to authenticated;
+
+
+-- tag what this migration owns, so a re-run knows them and the guard above knows what is not
+comment on function deal_ws_role(uuid) is 'summit 013';
+comment on function deal_ws_member(uuid) is 'summit 013';
+comment on function deal_ws_can_lead(uuid) is 'summit 013';
+comment on function source_mapped_fields(jsonb) is 'summit 013';
+comment on function csv_source_for(uuid) is 'summit 013';
+comment on function csv_import_preview(uuid, jsonb, jsonb) is 'summit 013';
+comment on function csv_import_apply(uuid, jsonb, text[], text, jsonb) is 'summit 013';
 
 commit;

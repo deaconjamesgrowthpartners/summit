@@ -32,7 +32,16 @@ test('migrations 007 to 016 run twice and every sync and board check passes', { 
     execFileSync('psql', [target, '-q', '-v', 'ON_ERROR_STOP=1', '-v', 'mig12=supabase/migrations/012_deal_sources.sql', '-f', 'test/sql/deal-sources.test.sql'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     // 013 and 014 on top: CSV upload with a preview, and deals typed in Summit
     execFileSync('psql', [target, '-q', '-v', 'ON_ERROR_STOP=1', '-v', 'mig13=supabase/migrations/013_csv_import.sql', '-v', 'mig14=supabase/migrations/014_native_deals.sql', '-v', 'mig15=supabase/migrations/015_workspaces_29029_deacon_james.sql', '-v', 'mig16=supabase/migrations/016_source_sync_cutover.sql', '-f', 'test/sql/native-csv.test.sql'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // the guard: a function name 014 uses, already taken by something 014 did not make, stops it before any change
+    psql(['-c', 'create function deal_ws_today(x int) returns int language sql as $$ select 1 $$'], target);
+    const before = psql(['-At', '-c', "select count(*) from pg_policies where tablename = 'deals'"], target);
+    let refused = '';
+    try { execFileSync('psql', [target, '-q', '-v', 'ON_ERROR_STOP=1', '-f', 'supabase/migrations/014_native_deals.sql'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (e) { refused = String(e.stderr); }
+    assert.match(refused, /not from 014: deal_ws_today\(integer\)/, 'refused, naming the clash');
+    assert.equal(psql(['-At', '-c', "select count(*) from pg_policies where tablename = 'deals'"], target), before, 'nothing changed');
   } catch (e) {
+    if (e.code === 'ERR_ASSERTION') throw e;
     assert.fail(String(e.stderr || e.message));
   } finally {
     psql(['-c', `drop database if exists ${db}`]);

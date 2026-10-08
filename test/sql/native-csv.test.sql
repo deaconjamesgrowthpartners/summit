@@ -15,8 +15,14 @@ insert into members (id, workspace_id, full_name, role, team, user_id) values
   ('00000000-0000-0000-0000-0000000000d3', '00000000-0000-0000-0000-0000000000d0', 'Bo Rep', 'rep', 'sourcing', '00000000-0000-0000-0000-0000000000e3');
 insert into opps (id, workspace_id, account, owner_member_id, stage, value, crm_ref) values
   ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000d0', 'Typed Co', '00000000-0000-0000-0000-0000000000d2', 'Meeting sat', 9000, 'Q-7');
+-- production has its own summit_member_id from 001, with a parameter called ws. 013 must leave it alone.
+create function summit_member_id(ws uuid) returns uuid language sql stable as $$ select null::uuid $$;
 \i :mig13
 \i :mig13
+do $$ begin
+  assert (select count(*) from pg_proc where proname = 'summit_member_id') = 1, '001''s function still the only one';
+  assert (select pg_get_function_arguments(oid) from pg_proc where proname = 'summit_member_id') = 'ws uuid', 'and untouched';
+end $$;
 \i :mig14
 \i :mig14
 do $$
@@ -112,7 +118,7 @@ begin
   reset role;
   assert (select source_id from deals where id = did) = (select id from deal_sources where workspace_id = nat), 'source set by the database';
   assert (select external_id from deals where id = did) is null, 'external id cannot be typed';
-  assert (select created_date from deals where id = did) = summit_today(nat), 'created today';
+  assert (select created_date from deals where id = did) = deal_ws_today(nat), 'created today';
   assert (select updated_by from deals where id = did) = '00000000-0000-0000-0000-0000000000e2', 'who';
   assert (select count(*) from deal_changes where deal_id = did and action = 'created') >= 4, 'created logged field by field';
   assert (select member_id from deal_changes where deal_id = did limit 1) = '00000000-0000-0000-0000-0000000000d2', 'logged against the roster row';
@@ -122,9 +128,9 @@ begin
   set local role authenticated;
   update deals set stage = 'Meeting booked', next_step = 'send deck' where id = did;
   reset role;
-  assert (select stage_date from deals where id = did) = summit_today(nat), 'stage date moves with the stage';
+  assert (select stage_date from deals where id = did) = deal_ws_today(nat), 'stage date moves with the stage';
   assert (select old_value || '>' || new_value from deal_changes where deal_id = did and field = 'stage' and action = 'updated') = 'Conversation>Meeting booked', 'stage change logged';
-  assert (select stage from deal_snapshots where deal_id = did and snap_date = summit_today(nat)) = 'Meeting booked', 'snapshot follows the stage';
+  assert (select stage from deal_snapshots where deal_id = did and snap_date = deal_ws_today(nat)) = 'Meeting booked', 'snapshot follows the stage';
 
   -- a rep cannot take another rep's deal, or give theirs away
   perform set_config('test.uid', '00000000-0000-0000-0000-0000000000e3', true);
@@ -179,7 +185,7 @@ begin
   -- the leader edits anything, hands deals over, and deletes. The log keeps a deleted deal.
   perform set_config('test.uid', '00000000-0000-0000-0000-0000000000e1', true);
   set local role authenticated;
-  update deals set owner_member_id = '00000000-0000-0000-0000-0000000000d3', stage = 'Signed', won_date = summit_today(nat) where id = did;
+  update deals set owner_member_id = '00000000-0000-0000-0000-0000000000d3', stage = 'Signed', won_date = deal_ws_today(nat) where id = did;
   get diagnostics n = row_count;
   assert n = 1, 'leader edits';
   update deal_accounts set name = 'Fresh Company' where workspace_id = nat;
