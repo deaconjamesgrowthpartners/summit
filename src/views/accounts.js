@@ -1,4 +1,4 @@
-import { S, oppsScoped, isLeader, reps, repOf, fromCrm, branchList } from '../data/store.js';
+import { S, oppsScoped, isLeader, reps, repOf, fromCrm, branchList, canAddDeals, sourceNote } from '../data/store.js';
 import { esc, money } from '../lib/format.js';
 import { isOpen, isWon, isLost, isUnknown, weighted, sum } from '../lib/rules.js';
 import { renderGrid, canEditOpp } from './grid.js';
@@ -39,7 +39,7 @@ export function renderAccounts(el) {
 
   const open = rows.filter((o) => isOpen(cfg, o)), won = rows.filter((o) => isWon(cfg, o));
   const unassigned = rows.filter((o) => o.unassigned), unknown = rows.filter((o) => isUnknown(cfg, o));
-  const canAdd = S.admin || (S.me && S.me.active);
+  const canAdd = canAddDeals();
   const addFor = S.me && S.me.role === 'rep' ? S.me.id : '';
   const addTeam = S.me && S.me.role === 'rep' ? S.me.team || '' : '';
   const probs = [...new Set(cfg.stages.filter((s) => s.status !== 'lost').map((s) => Math.round(s.prob * 100)))].sort((a, b) => a - b);
@@ -49,13 +49,13 @@ export function renderAccounts(el) {
   <div class="bar">
     <input type="search" class="ed" data-f="all_q" placeholder="Search account, contact, notes" value="${esc(fk('q'))}" aria-label="Search">
     <select class="ed" data-f="all_status"><option value="">Status: all</option>${(crm ? ['open', 'won', 'lost', 'unknown'] : ['open', 'won', 'lost']).map((s) => `<option value="${s}" ${fk('status') === s ? 'selected' : ''}>${s[0].toUpperCase() + s.slice(1)}</option>`).join('')}</select>
-    <select class="ed" data-f="all_cat"><option value="">Type: all</option>${[...new Set([...cfg.categories.map((c) => c.name), ...(crm ? oppsScoped().map((o) => o.category).filter(Boolean) : [])])].map((c) => `<option ${fk('cat') === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-    <select class="ed" data-f="all_branch"><option value="">Branch: all</option>${branchList().map((b) => `<option ${fk('branch') === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>
+    <select class="ed" data-f="all_cat" ${cfg.categories.length || crm ? '' : 'hidden'}><option value="">Type: all</option>${[...new Set([...cfg.categories.map((c) => c.name), ...(crm ? oppsScoped().map((o) => o.category).filter(Boolean) : [])])].map((c) => `<option ${fk('cat') === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+    ${branchList().length ? `<select class="ed" data-f="all_branch"><option value="">Branch: all</option>${branchList().map((b) => `<option ${fk('branch') === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>` : ''}
     <select class="ed" data-f="all_rep"><option value="">Rep: all</option>${reps().map((r) => `<option value="${esc(r.id)}" ${fk('rep') === r.id ? 'selected' : ''}>${esc(r.full_name)}</option>`).join('')}${crm ? `<option value="_unassigned" ${fk('rep') === '_unassigned' ? 'selected' : ''}>Not on the roster</option>` : ''}</select>
-    ${!crm && canAdd && (addFor || isLeader()) ? `<button class="btn sm" data-add="${esc(addFor)}" data-team="${esc(addTeam)}">+ Add account</button>` : ''}
+    ${canAdd && (addFor || isLeader()) ? `<button class="btn sm" data-add="${esc(addFor)}" data-team="${esc(addTeam)}">+ Add ${esc(cfg.dealWord)}</button>` : ''}
   </div>
   ${renderGrid(rows, { canEdit: canEditOpp, full: true })}
   ${crm
-    ? `<p class="note">From ${esc(cfg.crmLabel)}, synced nightly, read only. Click a header to sort. Status sets probability: ${cfg.stages.filter((s) => s.status === 'open').map((s) => `${esc(s.name)} ${Math.round(s.prob * 100)}%`).join(' · ')}. Won and lost are not pipeline.</p>`
+    ? `<p class="note">${esc(sourceNote())}, read only. Click a header to sort. Status sets probability: ${cfg.stages.filter((s) => s.status === 'open').map((s) => `${esc(s.name)} ${Math.round(s.prob * 100)}%`).join(' · ')}. Won and lost are not pipeline.</p>`
     : `<p class="note">Click a header to sort. Every edit saves and updates the Summit instantly. Stage sets probability: ${probs.join(' / ')}.</p>`}`;
 }

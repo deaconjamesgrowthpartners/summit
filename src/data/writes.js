@@ -2,6 +2,19 @@
 // row level security has the final say.
 import { S, ckey, memberById, wk, goals } from './store.js';
 import { toast, uuid } from '../lib/format.js';
+import { fromDeal, toDealPatch } from './pipeline.js';
+
+// a typed deal saves to deals (migration 014), or to opps before 014 runs. Either way the row comes back
+// in the board's shape.
+const typedDeal = (o) => o && o.src === 'native';
+async function saveDeal(id, patch) {
+  if (typedDeal(S.opps[id])) return fromDeal(S.cfg, await S.api.updateDeal(id, toDealPatch(patch)), 'native');
+  return S.api.updateOpp(id, patch);
+}
+async function addDeal(row) {
+  if (S.dealShape === 'board') return fromDeal(S.cfg, await S.api.insertDeal(toDealPatch(row)), 'native');
+  return S.api.insertOpp(row);
+}
 
 let rerender = () => {};
 export const onSaved = (fn) => (rerender = fn);
@@ -26,7 +39,9 @@ function chain(key, fn) {
 /* ---------- opps ---------- */
 export function writeOpp(id, patch) {
   const o = S.opps[id];
-  if (!o) return;
+  if (!o || o.readOnly) return;
+  // a stage change is a stage event today: the stage-entry measures count it straight away
+  if ('stage' in patch && patch.stage !== o.stage && patch.stage) o.stage_events = [...(o.stage_events || []), { d: wk().today, stage: patch.stage }];
   Object.assign(o, patch);
   queued[id] = { ...(queued[id] || {}), ...patch };
   clearTimeout(timers[id]);
@@ -39,8 +54,8 @@ function flushOpp(id) {
   if (!patch) return;
   chain(id, async () => {
     try {
-      const row = await S.api.updateOpp(id, patch);
-      S.opps[id] = { ...S.opps[id], ...row, ...(queued[id] || {}) };
+      const row = await saveDeal(id, patch);
+      S.opps[id] = { ...S.opps[id], ...row, stage_events: S.opps[id]?.stage_events, ...(queued[id] || {}) };
       toast('Saved');
     } catch (e) {
       toast(explain(e));
@@ -52,9 +67,10 @@ function flushOpp(id) {
 
 async function refetchOpp(id) {
   try {
-    const d = await S.api.load(S.cfg.id, wk().prevKey);
-    const fresh = d.opps.find((x) => x.id === id);
-    if (fresh) S.opps[id] = fresh; else delete S.opps[id];
+    const d = await S.api.load(S.cfg.id, wk().prevKey, S.cfg.source);
+    const r = d.deals.find((x) => String(x.deal_id ?? x.id) === id);
+    if (r) S.opps[id] = { ...(d.shape === 'board' ? fromDeal(S.cfg, r, 'native') : { ...r, src: 'opps', readOnly: false }), stage_events: S.opps[id]?.stage_events };
+    else delete S.opps[id];
   } catch { /* keep what we have */ }
 }
 
@@ -62,14 +78,14 @@ export async function addOpp(ownerId, team) {
   const owner = memberById(ownerId);
   const cat = S.cfg.categories.find((c) => c.default_for === team) || S.cfg.categories[0];
   const today = wk().today;
+  const board = S.dealShape === 'board';
   const row = {
     id: uuid(),
     workspace_id: S.cfg.id,
     owner_member_id: ownerId || null,
-    account: 'New account',
-    pipeline: team || owner?.team || null,
+    account: `New ${S.cfg.dealWord}`,
+    ...(board ? {} : { pipeline: team || owner?.team || null, recurring: cat ? cat.recurring : false }),
     category: cat ? cat.name : null,
-    recurring: cat ? cat.recurring : false,
     branch: owner?.branch || S.cfg.branches[0] || null,
     stage: S.cfg.stages[0]?.name || null,
     stage_date: today,
@@ -77,12 +93,12 @@ export async function addOpp(ownerId, team) {
     last_activity: today,
     priority: true,
   };
-  S.opps[row.id] = { ...row };
+  S.opps[row.id] = { ...row, src: board ? 'native' : 'opps', readOnly: false, created_date: today, stage_events: row.stage ? [{ d: today, stage: row.stage }] : [] };
   rerender();
   // chained so an edit typed before the insert lands waits for it
   chain(row.id, async () => {
     try {
-      const saved = await S.api.insertOpp(row);
+      const saved = await addDeal(row);
       S.opps[row.id] = { ...saved, ...S.opps[row.id] };
       toast('Added');
     } catch (e) {
@@ -92,6 +108,20 @@ export async function addOpp(ownerId, team) {
     rerender();
   });
   return row.id;
+}
+
+// the account list: the account a typed name belongs to, added when it is new. Saves the deal's link.
+export async function linkAccount(dealId, name) {
+  const key = String(name || '').trim().toLowerCase();
+  if (!key || S.dealShape !== 'board') return;
+  let a = Object.values(S.dealAccounts).find((x) => x.name.trim().toLowerCase() === key);
+  if (!a) {
+    try {
+      a = await S.api.insertDealAccount({ workspace_id: S.cfg.id, name: String(name).trim() });
+      S.dealAccounts[a.id] = a;
+    } catch { return; }
+  }
+  if (S.opps[dealId] && S.opps[dealId].account_id !== a.id) writeOpp(dealId, { account_id: a.id });
 }
 
 /* ---------- the book ---------- */
@@ -114,7 +144,7 @@ export function writeAccount(id, patch) {
       } catch (e) {
         toast(explain(e));
         try {
-          const d = await S.api.load(S.cfg.id, wk().prevKey);
+          const d = await S.api.load(S.cfg.id, wk().prevKey, S.cfg.source);
           const fresh = (d.accounts || []).find((x) => x.id === id);
           if (fresh) S.accounts[id] = fresh;
         } catch { /* keep what we have */ }

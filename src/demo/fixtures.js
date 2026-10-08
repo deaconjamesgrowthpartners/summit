@@ -214,3 +214,111 @@ export function fixtures(now = new Date()) {
   ];
   return { workspaces: [WS], members, opps, commits, goals, accounts, sync, pipeline, targets, tracking: d };
 }
+
+// ---------- two workspaces with no CRM, as migration 015 makes them. Test names, test numbers. ----------
+const JOE = '00000000-0000-4000-8000-0000000002j0';
+const NO_CRM_TABS = (teams) => [
+  { key: 'summit', label: 'Summit', filters: [], deal_word: 'deal' },
+  { key: 'climb', label: 'The Climb' },
+  ...teams,
+  { key: 'accounts', label: 'All Deals' },
+  { key: 'datacheck', label: 'Data Check' },
+];
+export const WS_29029 = {
+  id: '00000000-0000-4000-8000-000000000029', slug: '29029', name: 'EXPOSURE by 29029', active: true,
+  brand: { head: '#111111', accent: '#B4532A', bg: '#F6F5F2', panel: '#ECEAE5', muted: '#8A8580', font: 'Instrument Sans', logo: null },
+  branches: [], lock_dow: 2, lock_time: '17:00:00', lock_tz: 'America/New_York', late_policy: 'flag', pipeline: {}, crm_source: null,
+  stages: [
+    { name: 'Conversation', prob: 0.05, status: 'open' }, { name: 'Meeting booked', prob: 0.15, status: 'open' },
+    { name: 'Meeting sat', prob: 0.3, status: 'open', needs_close: true }, { name: 'Proposal out', prob: 0.6, status: 'open', needs_close: true, bid: true },
+    { name: 'Signed', prob: 1, status: 'won' }, { name: 'Lost', prob: 0, status: 'lost' },
+  ],
+  categories: [],
+  measures: [
+    { key: 'conversations', type: 'count', label: 'Conversations' },
+    { key: 'booked', type: 'count', label: 'Meetings booked', auto: { stage_entered: 'Meeting booked' } },
+    { key: 'sat', type: 'count', label: 'Meetings sat', auto: { stage_entered: 'Meeting sat' } },
+    { key: 'proposals', type: 'count', label: 'Proposals out', auto: { stage_entered: 'Proposal out' } },
+    { key: 'signed', type: 'count', label: 'Signed', auto: { stage_entered: 'Signed' } },
+  ],
+  tabs: NO_CRM_TABS([{ key: 'outreach', label: 'Outreach', team: 'outreach', title: 'Outreach', sub: 'EXPOSURE by 29029', team_label: 'Seller', note_prompt: 'What do you need this week?' }]),
+  goal_tiles: [],
+};
+export const WS_DJ = {
+  id: '00000000-0000-4000-8000-0000000000dj', slug: 'deacon-james', name: 'Deacon James', active: true,
+  brand: { head: '#0A132B', accent: '#C1440E', bg: '#F5F3EE', panel: '#ECE8E1', muted: '#8C8682', font: 'Archivo', logo: null },
+  branches: [], lock_dow: 2, lock_time: '17:00:00', lock_tz: 'America/New_York', late_policy: 'flag', pipeline: {}, crm_source: null,
+  stages: [
+    { name: 'Lead', prob: 0.05, status: 'open' }, { name: 'Meeting booked', prob: 0.15, status: 'open' },
+    { name: 'Meeting sat', prob: 0.3, status: 'open', needs_close: true }, { name: 'Proposal', prob: 0.6, status: 'open', needs_close: true, bid: true },
+    { name: 'Signed', prob: 1, status: 'won' }, { name: 'Lost', prob: 0, status: 'lost' },
+  ],
+  categories: [],
+  measures: [
+    { key: 'booked', type: 'count', label: 'Meetings booked', auto: { stage_entered: 'Meeting booked' } },
+    { key: 'sat', type: 'count', label: 'Meetings sat', auto: { stage_entered: 'Meeting sat' } },
+    { key: 'proposals', type: 'count', label: 'Proposals', auto: { stage_entered: 'Proposal' } },
+    { key: 'signed', type: 'count', label: 'Signed', auto: { stage_entered: 'Signed' } },
+    { key: 'src_booked', type: 'count', label: 'Sourced meetings booked' },
+    { key: 'src_sat', type: 'count', label: 'Sourced meetings sat' },
+  ],
+  tabs: NO_CRM_TABS([
+    { key: 'pipeline', label: 'Pipeline', team: 'pipeline', title: "Joe's pipeline", team_label: 'Seller', measures: ['booked', 'sat', 'proposals', 'signed'] },
+    { key: 'sourcing', label: 'Sourcing', team: 'sourcing', title: 'Sourcing', team_label: 'Sourcing team', measures: ['src_booked', 'src_sat'],
+      labels: { src_booked: 'Meetings booked', src_sat: 'Meetings sat' }, note_prompt: 'Who do you need an intro to this week?' },
+  ]),
+  goal_tiles: [],
+};
+
+// typed deals with a stage history, the way deal_board and deal_changes return them
+export function noCrmFixtures(now = new Date()) {
+  const r = rng(29);
+  const d = now.toISOString().slice(0, 10);
+  const key = displayKeyAt(WS_29029, now), prev = addDays(key, -7);
+  const mk = (ws, i, full_name, role, team, tag, user = null) => ({
+    id: `00000000-0000-4000-8000-${ws.slug === '29029' ? '29' : 'dj'}${String(i).padStart(10, '0')}`, workspace_id: ws.id,
+    user_id: user || `00000000-0000-4000-8000-${ws.slug === '29029' ? '39' : 'ej'}${String(i).padStart(10, '0')}`,
+    email: `joe+${tag}@deaconjames.com`, full_name, role, team, branch: null, active: true,
+  });
+  const members = [
+    mk(WS_29029, 1, 'Joe Foor', 'rep', 'outreach', 'joe', JOE), mk(WS_29029, 2, 'Lisa Barnes', 'viewer', null, 'lisa'),
+    mk(WS_29029, 3, 'Benjamin Sutton', 'viewer', null, 'benjamin'),
+    mk(WS_DJ, 1, 'Joe Foor', 'rep', 'pipeline', 'joe', JOE), mk(WS_DJ, 2, 'Test Sourcer One', 'rep', 'sourcing', 'sourcer1'),
+    mk(WS_DJ, 3, 'Test Sourcer Two', 'rep', 'sourcing', 'sourcer2'), mk(WS_DJ, 4, 'Test Leader', 'leader', null, 'djlead'),
+  ];
+  const deals = [], events = [];
+  const build = (ws, owner, names) => names.forEach((account, i) => {
+    const path = ws.stages.filter((s) => s.status !== 'lost').map((s) => s.name);
+    const reach = Math.floor(r() * path.length), lost = r() < 0.12;
+    const created = addDays(d, -Math.round(5 + r() * 50));
+    let day = created;
+    const hist = [];
+    for (let k = 0; k <= reach; k++) { hist.push({ d: day, stage: path[k] }); day = addDays(day, Math.round(2 + r() * 8)); if (day > d) day = d; }
+    if (lost) hist.push({ d: day, stage: 'Lost' });
+    const last = hist[hist.length - 1];
+    const id = `00000000-0000-4000-8000-${ws.slug === '29029' ? 'a9' : 'aj'}${String(i).padStart(10, '0')}`;
+    hist.forEach((h) => events.push({ deal_id: id, d: h.d, stage: h.stage }));
+    const won = last.stage === 'Signed';
+    deals.push({
+      workspace_id: ws.id, deal_id: id, source_mode: 'native', account, job: '', member_id: owner.id, owner_member_id: owner.id, unassigned: false,
+      stage: last.stage, stage_date: last.d, value_estimated: Math.round((ws.slug === '29029' ? 15000 + r() * 60000 : 8000 + r() * 30000) / 500) * 500,
+      value_won: null, close_date: !won && !lost && r() > 0.3 ? addDays(d, Math.round(r() * 45)) : null, won_date: won ? last.d : null,
+      lost_date: lost ? last.d : null, start_date: won ? addDays(last.d, Math.round(10 + r() * 60)) : null, created_date: created,
+      created_at: `${created}T15:00:00Z`, next_step: r() > 0.3 ? 'Follow up' : '', next_step_date: r() > 0.4 ? addDays(d, Math.round(-3 + r() * 10)) : null,
+      last_activity: addDays(d, -Math.round(r() * 10)), priority: r() > 0.7, installed: false,
+    });
+  });
+  build(WS_29029, members[0], ['Northwind Partners', 'Apex Capital', 'Harbor Group', 'Summit Health', 'Blue Ridge Ventures', 'Crescent Bank',
+    'Ironwood Holdings', 'Meridian Labs', 'Trailhead Co', 'Granite Advisors', 'Lakeshore Family Office', 'Cobalt Systems']);
+  build(WS_DJ, members[3], ['Peak Roofing', 'Clearwater HVAC', 'Bright Dental Group', 'Atlas Plumbing', 'Keystone Home Services', 'Evergreen Pest',
+    'Pioneer Electric', 'Riverstone Clinics', 'Copperline Logistics']);
+  const commits = [];
+  const c29 = (m, wk, com, act) => commits.push({ id: `${m.id.slice(0, -2)}c${wk === key ? 1 : 0}`, workspace_id: m.workspace_id, member_id: m.id, week_key: wk,
+    committed: com, actual: act, note: '', submitted_at: now.toISOString(), late: false, accepted_by: null, updated_at: now.toISOString() });
+  c29(members[0], prev, { conversations: 25, booked: 4, sat: 3, proposals: 2, signed: 1 }, { conversations: 22 });
+  c29(members[3], prev, { booked: 3, sat: 2, proposals: 2, signed: 1 }, {});
+  c29(members[4], prev, { src_booked: 5, src_sat: 3 }, { src_booked: 6, src_sat: 2 });
+  c29(members[5], prev, { src_booked: 4, src_sat: 3 }, { src_booked: 2, src_sat: 2 });
+  c29(members[4], key, { src_booked: 5, src_sat: 4 }, {});
+  return { workspaces: [WS_29029, WS_DJ], members, deals, events, commits };
+}

@@ -1,15 +1,19 @@
 // The shared inline-edit grid. Every edit saves and updates every screen.
-import { S, wk, memberById, repOf } from '../data/store.js';
+import { S, wk, memberById, repOf, isViewer } from '../data/store.js';
 import { esc, money, validDate } from '../lib/format.js';
 import { isWon, prob, weighted, rowIssues, flag } from '../lib/rules.js';
 
 export function renderGrid(rows, { canEdit = () => false, full = false } = {}) {
   if (!rows.length) return '<div class="card empty">Nothing here yet.</div>';
-  if (S.cfg.pipelineSource === 'aspire') return crmGrid(rows, full);
+  if (S.cfg.readOnly) return crmGrid(rows, full);
   const cfg = S.cfg, w = wk();
-  const cols = full
+  // columns the workspace has no use for stay off: no branches, no categories, no CRM to cross-check
+  const off = new Set([...(cfg.branches.length ? [] : ['branch']), ...(cfg.categories.length ? [] : ['category']), ...(cfg.crossCheck ? [] : ['crm_ref'])]);
+  const cols = (full
     ? ['flag', 'pri', 'account', 'contact', 'branch', 'owner', 'category', 'segment', 'value', 'stage', 'prob', 'weighted', 'close_date', 'start_date', 'bid_date', 'next_step', 'next_step_date', 'last_activity', 'crm_ref', 'notes']
-    : ['flag', 'pri', 'account', 'category', 'value', 'stage', 'close_date', 'start_date', 'next_step', 'next_step_date', 'last_activity', 'crm_ref'];
+    : ['flag', 'pri', 'account', 'category', 'value', 'stage', 'close_date', 'start_date', 'next_step', 'next_step_date', 'last_activity', 'crm_ref']).filter((c) => !off.has(c));
+  // the account list, offered as you type an account name
+  const names = Object.values(S.dealAccounts || {}).map((a) => a.name).sort((a, b) => a.localeCompare(b));
   const head = {
     flag: '', pri: '', account: 'Account', contact: 'Contact', segment: 'Segment', branch: 'Branch', owner: 'Rep', category: 'Type', value: 'Est $', stage: 'Stage',
     prob: 'Prob', weighted: 'Weighted', close_date: 'Exp. close', start_date: 'Target start', bid_date: 'Bid sent',
@@ -28,7 +32,7 @@ export function renderGrid(rows, { canEdit = () => false, full = false } = {}) {
       case 'pri': return isWon(cfg, o)
         ? `<td><button class="ed tog ${o.installed ? 'done' : ''} ${iss.some((i) => i.f === 'installed') ? 'miss' : ''}" ${ro} data-id="${esc(o.id)}" data-k="installed" data-toggle="1" title="Mark installed / started">${o.installed ? '✓ installed' : 'installed?'}</button></td>`
         : `<td><button class="ed tog" ${ro} data-id="${esc(o.id)}" data-k="priority" data-toggle="1" title="Priority account" aria-pressed="${!!o.priority}">${o.priority ? '★' : '☆'}</button></td>`;
-      case 'account': return `<td class="acct"><input class="ed acctname" ${at} value="${esc(o.account)}" aria-label="Account">${full ? '' : `<small>${esc([o.branch, o.segment, o.contact].filter(Boolean).join(' · '))}</small>`}</td>`;
+      case 'account': return `<td class="acct"><input class="ed acctname" ${at} ${names.length ? 'list="acctlist"' : ''} value="${esc(o.account)}" aria-label="Account">${full ? '' : `<small>${esc([o.branch, o.segment, o.contact].filter(Boolean).join(' · '))}</small>`}</td>`;
       case 'contact': return `<td><input class="ed txt" style="width:160px" ${at} value="${esc(o.contact || '')}" placeholder="name, phone"></td>`;
       case 'segment': return `<td><input class="ed txt" style="width:150px" ${at} value="${esc(o.segment || '')}"></td>`;
       case 'branch': return `<td><select class="ed" ${at}>${withCur(cfg.branches, o.branch).map((b) => opt(b, o.branch)).join('')}</select></td>`;
@@ -49,10 +53,10 @@ export function renderGrid(rows, { canEdit = () => false, full = false } = {}) {
 
   return `<div class="tw"><table><thead><tr>${cols.map((c) => `<th class="${numCols.includes(c) ? 'num' : ''}" ${full && c !== 'flag' && c !== 'pri' ? `data-sort="${c}"` : ''}>${esc(head[c])}</th>`).join('')}</tr></thead><tbody>
   ${rows.map((o) => { const ro = canEdit(o) ? '' : 'disabled'; const iss = rowIssues(cfg, o, w.today, S.crm); return `<tr data-row="${esc(o.id)}">${cols.map((c) => cell(o, c, ro, iss)).join('')}</tr>`; }).join('')}
-  </tbody></table></div>`;
+  </tbody></table></div>${names.length ? `<datalist id="acctlist">${names.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>` : ''}`;
 }
 
-// Aspire deals: read only. Fix a deal in Aspire and the nightly sync brings it here.
+// deals from a CRM or a file: read only. Fix a deal there and the next sync or upload brings it here.
 // A rep Aspire names who is not on the roster shows with a plain "not on roster" tag. Never red.
 export function repCell(o) {
   const n = repOf(o);
@@ -92,11 +96,11 @@ function crmGrid(rows, full) {
 }
 const fmtDay = (d) => { const [y, m, dd] = d.split('-'); return `${+m}/${+dd}/${y.slice(2)}`; };
 
-// who may edit a row: leaders anything, reps their own. RLS enforces the same.
+// who may edit a row: leaders anything, reps their own, viewers nothing. RLS enforces the same.
 export function canEditOpp(o) {
-  if (o.src === 'aspire') return false;
+  if (o.readOnly) return false;
   if (S.admin) return true;
-  if (!S.me || !S.me.active) return false;
+  if (!S.me || !S.me.active || isViewer()) return false;
   if (S.me.role === 'leader') return true;
   return o.owner_member_id === S.me.id;
 }

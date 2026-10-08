@@ -1,8 +1,12 @@
 // Turns a workspaces row into the config every screen reads.
-// Every label, stage, measure, category and goal comes from the row.
+// Every label, stage, measure, category, team and goal comes from the row. Where the deals come from
+// comes from the workspace's deal source (migration 012): connected, csv or native.
 
-const SCREENS = ['summit', 'climb', 'grow', 'netnew', 'accounts', 'datacheck'];
-const TEAMS = ['grow', 'netnew'];
+// screens with their own view. Any other tab key is a team tab when it names a team.
+const SCREENS = ['summit', 'climb', 'accounts', 'datacheck'];
+// before team tabs were named in config, these two keys were the teams
+const LEGACY_TEAMS = ['grow', 'netnew'];
+export const MODES = ['connected', 'csv', 'native'];
 
 const arr = (v) => (Array.isArray(v) ? v : []);
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
@@ -17,32 +21,68 @@ const toStage = (s) => ({
   hold: !!s.hold,
 });
 
-export function normalize(ws) {
+// the workspace's one source of truth for deals. Before migration 012 there is no deal_sources row,
+// so it is read off the old pipeline config: Aspire, or typed in Summit.
+export function dealSource(ws, src) {
+  if (src && MODES.includes(src.mode)) {
+    return { mode: src.mode, label: src.label || (src.mode === 'native' ? 'Summit' : src.connector || 'CRM'), connector: src.connector || null, id: src.id ?? null, mapping: obj(src.mapping), legacy: false };
+  }
+  return obj(ws.pipeline).source === 'aspire'
+    ? { mode: 'connected', label: 'Aspire', connector: 'aspire', id: null, legacy: true }
+    : { mode: 'native', label: 'Summit', connector: null, id: null, legacy: true };
+}
+
+// an auto measure: a board number by name (bids_count, won_value, ...), or the deals that reached a stage
+// that week: { stage_entered: "Meeting booked" }, counted, or { stage_entered: ..., sum: "value" } in dollars.
+function toAuto(a) {
+  if (typeof a === 'string' && a) return a;
+  const o = obj(a);
+  if (o.stage_entered) return { stage_entered: String(o.stage_entered), sum: o.sum === 'value' ? 'value' : 'count' };
+  return null;
+}
+
+export function normalize(ws, src = null) {
+  const source = dealSource(ws, src);
+  const readOnly = source.mode !== 'native';
   const measures = arr(ws.measures)
     .filter((m) => m && m.key)
-    .map((m) => ({
-      key: String(m.key),
-      type: m.type === 'money' ? 'money' : 'count',
-      money: m.type === 'money',
-      label: m.label || m.key,
-      label_grow: m.label_grow || m.label || m.key,
-      label_netnew: m.label_netnew || m.label || m.key,
-      auto: m.auto || null,
-    }));
+    .map((m) => {
+      // labels per team: { grow: 'Site audits', netnew: 'Site walks' }. label_<team> still reads.
+      const labels = { ...obj(m.labels) };
+      for (const [k, v] of Object.entries(m)) if (k.startsWith('label_') && v) labels[k.slice(6)] = String(v);
+      return {
+        key: String(m.key),
+        type: m.type === 'money' ? 'money' : 'count',
+        money: m.type === 'money',
+        label: m.label || m.key,
+        labels,
+        // a team tab's own word for it ({ labels: { src_booked: 'Meetings booked' } }): on that tab only
+        tabLabels: {},
+        auto: toAuto(m.auto),
+      };
+    });
 
+  // a team tab names its team: { key: 'outreach', team: 'outreach', measures: ['conv', 'booked'] }.
+  // measures, when set, are the ones that team commits to; otherwise every measure.
   const tabs = arr(ws.tabs)
     .map((t) => (typeof t === 'string' ? { key: t } : obj(t)))
-    .filter((t) => SCREENS.includes(t.key))
-    .map((t) => ({ ...t, label: t.label || t.key, team: TEAMS.includes(t.team) ? t.team : TEAMS.includes(t.key) ? t.key : null }));
+    .map((t) => ({ ...t, team: t.team ? String(t.team) : LEGACY_TEAMS.includes(t.key) ? t.key : null }))
+    .filter((t) => t.key && (SCREENS.includes(t.key) || t.team))
+    .map((t) => ({ ...t, key: String(t.key), label: t.label || t.key, measures: arr(t.measures).map(String) }));
+  for (const t of tabs) for (const [k, v] of Object.entries(obj(t.labels))) {
+    const m = measures.find((x) => x.key === k);
+    if (m && t.team && v) m.tabLabels[t.team] = String(v);
+  }
 
-  // where the deals come from. "aspire": the board reads aspire_pipeline, and the stages are the
-  // Aspire statuses from the config. Anything else: the opps table and the workspace's own stages.
+  // the stages: a connected or csv source's statuses from the pipeline config (each says open, won or
+  // lost), or the workspace's own stages when people type their deals.
   const pl = obj(ws.pipeline);
-  const pipelineSource = pl.source === 'aspire' ? 'aspire' : 'summit';
-  const stageList = pipelineSource === 'aspire' ? arr(pl.statuses) : arr(ws.stages);
+  const pipelineSource = readOnly ? 'aspire' : 'summit';
+  const fromStatuses = readOnly && Array.isArray(pl.statuses);
+  const stageList = fromStatuses ? arr(pl.statuses) : arr(ws.stages);
   const stages = stageList
     .map((s) => (typeof s === 'string' ? { name: s } : obj(s)))
-    .filter((s) => s.name && (pipelineSource !== 'aspire' || ['open', 'won', 'lost'].includes(s.status)))
+    .filter((s) => s.name && (!fromStatuses || ['open', 'won', 'lost'].includes(s.status)))
     .map(toStage);
   const stageBy = Object.fromEntries(stages.map((s) => [s.name, s]));
   const stageByKey = Object.fromEntries(stages.map((s) => [nameKey(s.name), s]));
@@ -59,7 +99,7 @@ export function normalize(ws) {
   const winRate = ['properties', 'deals', 'off'].includes(pl.win_rate) ? pl.win_rate : 'deals';
   // what counts toward a new maintenance goal: properties new to the book (the default), or every
   // recurring dollar. Only CRM deals carry the history to tell them apart.
-  const newMaintenanceBasis = pipelineSource !== 'aspire' ? 'all_recurring'
+  const newMaintenanceBasis = !readOnly ? 'all_recurring'
     : pl.new_maintenance_basis === 'all_recurring' ? 'all_recurring' : 'new_properties';
 
   const categories = arr(ws.categories)
@@ -89,6 +129,11 @@ export function normalize(ws) {
   const summitTab = tabs.find((t) => t.key === 'summit') || {};
   const summitTiles = arr(summitTab.tiles).map(obj).filter((x) => x.type && x.label);
   const check = tabs.find((t) => t.key === 'datacheck') || {};
+  // the Summit filters and their words. Maintenance / Install needs a recurring category to mean anything.
+  const hasRecurring = categories.some((c) => c.recurring) || readOnly;
+  const filters = (Array.isArray(summitTab.filters) ? summitTab.filters : ['division', 'kind']).filter((f) => f !== 'division' || hasRecurring);
+  const words = obj(summitTab.words);
+  const branches = arr(ws.branches).map(String);
 
   return {
     id: ws.id,
@@ -97,6 +142,16 @@ export function normalize(ws) {
     brand: obj(ws.brand),
     measures,
     tabs,
+    source,
+    readOnly,
+    // what a deal is called on screen, and whether the board splits by branch
+    dealWord: summitTab.deal_word || (readOnly ? 'deal' : 'account'),
+    filters,
+    words: {
+      maintenance: words.maintenance || 'Maintenance', install: words.install || 'Install',
+      enhancement: words.enhancement || 'Enhancement', netnew: words.netnew || 'Net New',
+    },
+    byBranch: branches.length > 1 || readOnly,
     pipelineSource,
     stages,
     stageBy,
@@ -112,9 +167,11 @@ export function normalize(ws) {
     teamTab,
     book,
     summitTiles,
-    crmLabel: check.crm_label || 'CRM',
+    crmLabel: check.crm_label || (readOnly ? source.label : 'CRM'),
+    // the paste-an-export cross-check, for typed deals: only when the workspace names a CRM to check against
+    crossCheck: !readOnly && !!check.crm_label,
     crmSource: ws.crm_source || null,
-    branches: arr(ws.branches).map(String),
+    branches,
     lock_dow: +ws.lock_dow || 2,
     lock_time: ws.lock_time || '17:00',
     lock_tz: ws.lock_tz || 'America/New_York',
@@ -122,12 +179,21 @@ export function normalize(ws) {
   };
 }
 
-// label for a measure: per team, or both when they differ
+// label for a measure: the team's word for it, or every team's word when they differ
 export function mLabel(m, team) {
-  if (team === 'grow') return m.label_grow;
-  if (team === 'netnew') return m.label_netnew;
-  return m.label_grow === m.label_netnew ? m.label_grow : `${m.label_grow} / ${m.label_netnew}`;
+  if (team) return m.tabLabels?.[team] || m.labels[team] || m.label;
+  const all = [...new Set(Object.values(m.labels))];
+  return all.length ? all.join(' / ') : m.label;
 }
+
+// the measures a team commits to: its tab's list, in that order, or every measure
+export function teamMeasures(cfg, team) {
+  const t = cfg.teamTab[team];
+  if (!t || !t.measures.length) return cfg.measures;
+  return t.measures.map((k) => cfg.measures.find((m) => m.key === k)).filter(Boolean);
+}
+// the measures a member commits to, by their team
+export const memberMeasures = (cfg, member) => teamMeasures(cfg, member?.team);
 
 // every goal key the leadership editor should show, with its label and type
 export function goalFields(cfg) {

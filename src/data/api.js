@@ -96,12 +96,28 @@ export async function isAdmin(userId) {
   const rows = must(await sb.from('app_admins').select('user_id').eq('user_id', userId));
   return rows.length > 0;
 }
-// source "aspire": deals come from the aspire_pipeline view, not the opps table. opps is left alone.
-export async function load(wsId, sinceWeek, source = 'summit') {
-  const deals = source === 'aspire'
-    ? all(() => sb.from('aspire_pipeline').select('*').eq('workspace_id', wsId).order('opportunity_id'))
+// the workspace's deal source (migration 012). null before it runs, and the config falls back.
+export async function source(wsId) {
+  try {
+    return must(await sb.from('deal_sources').select('id,mode,connector,label,mapping,schedule,enabled').eq('workspace_id', wsId).maybeSingle());
+  } catch {
+    return null;
+  }
+}
+
+// Everything a workspace's board reads. Deals come in one of three shapes, said in data.shape:
+//   board   deal_board (migration 012), any source
+//   aspire  aspire_pipeline, a connected workspace before 012
+//   opps    the opps table, typed deals before 014
+export async function load(wsId, sinceWeek, src = { mode: 'native', legacy: true }) {
+  let shape = src.legacy ? (src.mode === 'native' ? 'opps' : 'aspire') : 'board';
+  // stage history for typed deals: what "meetings booked this week" is counted from. null before 014.
+  const events = shape === 'board' && src.mode === 'native' ? await stageEvents(wsId) : null;
+  if (shape === 'board' && src.mode === 'native' && events === null) shape = 'opps';
+  const deals = shape === 'board' ? all(() => sb.from('deal_board').select('*').eq('workspace_id', wsId).order('created_at').order('deal_id'))
+    : shape === 'aspire' ? all(() => sb.from('aspire_pipeline').select('*').eq('workspace_id', wsId).order('opportunity_id'))
     : all(() => sb.from('opps').select('*').eq('workspace_id', wsId).order('created_at'));
-  const [members, opps, commits, goals, accounts] = await Promise.all([
+  const [members, rows, commits, goals, accounts] = await Promise.all([
     all(() => sb.from('members').select('*').eq('workspace_id', wsId).order('full_name')),
     deals,
     all(() => sb.from('commits').select('*').eq('workspace_id', wsId).gte('week_key', sinceWeek)),
@@ -109,16 +125,40 @@ export async function load(wsId, sinceWeek, source = 'summit') {
     // the book is optional. a workspace without one still loads.
     all(() => sb.from('accounts').select('*').eq('workspace_id', wsId).order('property')).catch(() => []),
   ]);
-  const extra = { sync: await syncLog(wsId), targets: await targets(wsId), tracking: source === 'aspire' ? await trackingSince(wsId) : null };
-  return source === 'aspire'
-    ? { members, opps: [], pipeline: opps, commits, goals, accounts, ...extra }
-    : { members, opps, commits, goals, accounts, ...extra };
+  const native = shape !== 'aspire' && src.mode === 'native';
+  const extra = {
+    sync: await syncLog(wsId, src), targets: await targets(wsId),
+    tracking: src.mode !== 'native' ? await trackingSince(wsId) : null,
+    dealAccounts: native && shape === 'board' ? await dealAccounts(wsId) : [],
+    changes: native && shape === 'board' ? await recentChanges(wsId) : [],
+  };
+  return { members, deals: rows, shape, events, commits, goals, accounts, ...extra };
 }
-// the Aspire sync log and the names Aspire has that the roster does not. null before migration 007.
-export async function syncLog(wsId) {
+// stage changes of typed deals, oldest first: { deal_id, d, stage }. null before migration 014.
+export async function stageEvents(wsId) {
   try {
-    const runs = must(await sb.from('aspire_sync_runs').select('*').eq('workspace_id', wsId).order('started_at', { ascending: false }).limit(6));
-    const unmatched = must(await sb.from('aspire_unmatched').select('*').eq('workspace_id', wsId).order('deals', { ascending: false }));
+    const rows = await all(() => sb.from('deal_changes').select('deal_id,changed_on,new_value').eq('workspace_id', wsId).eq('field', 'stage').order('id'));
+    return rows.map((r) => ({ deal_id: r.deal_id, d: r.changed_on, stage: r.new_value }));
+  } catch {
+    return null;
+  }
+}
+export async function dealAccounts(wsId) {
+  try { return await all(() => sb.from('deal_accounts').select('*').eq('workspace_id', wsId).order('name')); } catch { return []; }
+}
+export async function recentChanges(wsId) {
+  try { return must(await sb.from('deal_changes').select('*').eq('workspace_id', wsId).order('id', { ascending: false }).limit(40)); } catch { return []; }
+}
+// the sync or upload log, and the names a source has that the roster does not. null before migration 007.
+export async function syncLog(wsId, src = {}) {
+  try {
+    const runsQ = src.legacy === false
+      ? sb.from('source_runs').select('*').eq('workspace_id', wsId).order('started_at', { ascending: false }).limit(8)
+      : sb.from('aspire_sync_runs').select('*').eq('workspace_id', wsId).order('started_at', { ascending: false }).limit(6);
+    const runs = must(await runsQ);
+    const unmatched = src.legacy === false
+      ? must(await sb.from('deal_unmatched').select('*').eq('workspace_id', wsId).order('deals', { ascending: false })).map((u) => ({ ...u, sales_rep_name: u.rep_name }))
+      : must(await sb.from('aspire_unmatched').select('*').eq('workspace_id', wsId).order('deals', { ascending: false }));
     return { runs, unmatched };
   } catch {
     return null;
@@ -136,7 +176,9 @@ export async function targets(wsId) {
 // the first day a status snapshot was written: when "pipeline advanced" became measurable
 export async function trackingSince(wsId) {
   try {
-    const rows = must(await sb.from('aspire_status_snapshots').select('snap_date').eq('workspace_id', wsId).order('snap_date').limit(1));
+    let rows;
+    try { rows = must(await sb.from('deal_snapshots').select('snap_date').eq('workspace_id', wsId).order('snap_date').limit(1)); }
+    catch { rows = must(await sb.from('aspire_status_snapshots').select('snap_date').eq('workspace_id', wsId).order('snap_date').limit(1)); }
     return rows[0]?.snap_date || null;
   } catch {
     return null;
@@ -144,9 +186,12 @@ export async function trackingSince(wsId) {
 }
 
 /* ---------- live ---------- */
-export function subscribe(wsId, onChange, onStatus) {
+// typed deals subscribe to deals and the account list (migration 014 puts them on the channel). Every other
+// workspace keeps the tables it always had, so a table missing from the channel never breaks it.
+export function subscribe(wsId, onChange, onStatus, shape = 'opps') {
   const ch = sb.channel(`summit-${wsId}`);
-  for (const table of ['opps', 'commits', 'goals', 'accounts']) {
+  const tables = shape === 'board' ? ['deals', 'deal_accounts', 'commits', 'goals', 'accounts'] : ['opps', 'commits', 'goals', 'accounts'];
+  for (const table of tables) {
     ch.on('postgres_changes', { event: '*', schema: 'public', table, filter: `workspace_id=eq.${wsId}` },
       (p) => onChange(table, p.eventType, p.new, p.old));
   }
@@ -155,15 +200,35 @@ export function subscribe(wsId, onChange, onStatus) {
 }
 
 /* ---------- writes ---------- */
-// admins only: the function's gate refuses everyone else. it reads Aspire and writes aspire_opps.
-export async function runSync(full = false) {
-  const { data, error } = await sb.functions.invoke('aspire-sync', { body: { full } });
+// admins only: the function's gate refuses everyone else. It reads the CRM and writes deals.
+// source-sync once it is deployed; the old aspire-sync until then.
+export async function runSync(full = false, slug = null) {
+  let res = await sb.functions.invoke('source-sync', { body: { full, workspace: slug } });
+  if (res.error && res.error.context?.status === 404) res = await sb.functions.invoke('aspire-sync', { body: { full } });
+  const { data, error } = res;
   if (error) {
     let msg = error.message;
     try { const b = await error.context?.json?.(); msg = b?.error || b?.run?.errors?.[0] || msg; } catch { /* keep the message */ }
     throw new Error(msg);
   }
   return data;
+}
+// typed deals (migration 014). Row level security says who may.
+export async function insertDeal(row) {
+  return must(await sb.from('deals').insert(row).select().single());
+}
+export async function updateDeal(id, patch) {
+  return must(await sb.from('deals').update(patch).eq('id', id).select().single());
+}
+export async function insertDealAccount(row) {
+  return must(await sb.from('deal_accounts').insert(row).select().single());
+}
+// a CSV file: what it would change, then write it. Leaders only, the functions check.
+export async function csvPreview(wsId, rows, mapping) {
+  return must(await sb.rpc('csv_import_preview', { p_workspace: wsId, p_rows: rows, p_mapping: mapping }));
+}
+export async function csvApply(wsId, rows, remove, fileName, mapping) {
+  return must(await sb.rpc('csv_import_apply', { p_workspace: wsId, p_rows: rows, p_remove: remove, p_file_name: fileName, p_mapping: mapping }));
 }
 export async function insertOpp(row) {
   return must(await sb.from('opps').insert(row).select().single());

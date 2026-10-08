@@ -1,11 +1,12 @@
 import './styles/base.css';
 import { S, wk, ckey, isLeader, memberById, pickGoals, tabFor } from './data/store.js';
 import { normalize } from './data/workspace.js';
-import { writeOpp, writeCommit, writeGoal, writeAccount, writeTarget, addOpp, acceptLate, onSaved } from './data/writes.js';
+import { writeOpp, writeCommit, writeGoal, writeAccount, writeTarget, addOpp, acceptLate, onSaved, linkAccount } from './data/writes.js';
 import { $, toast, num, addDays } from './lib/format.js';
 import { applyBrand } from './lib/theme.js';
 import { stageOf, parseCrm, isWon } from './lib/rules.js';
-import { fromAspire, isExcluded } from './data/pipeline.js';
+import { fromAspire, fromDeal, fromOpp, isExcluded } from './data/pipeline.js';
+import { uploadFile, uploadMap, uploadPreview, uploadApply, uploadTick, uploadClear, uploadRemap } from './views/upload.js';
 import { renderHeader } from './views/header.js';
 import { renderSummit } from './views/summit.js';
 import { renderClimb } from './views/climb.js';
@@ -84,7 +85,7 @@ async function boot() {
 function teardown() {
   if (unsub) unsub();
   unsub = null;
-  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, commits: {}, accounts: {}, goalsRow: null, filters: {}, sort: {}, crm: null, sync: null, syncing: false, excluded: [], targets: [], tracking: null });
+  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, dealShape: 'opps', commits: {}, accounts: {}, dealAccounts: {}, changes: [], upload: null, goalsRow: null, filters: {}, sort: {}, crm: null, sync: null, syncing: false, excluded: [], targets: [], tracking: null });
   applyBrand({});
 }
 
@@ -117,16 +118,25 @@ async function start() {
 // commits back to Jan 1, so The Climb and Summit can add up a month, a quarter or the year
 const commitsSince = (w) => { const y = `${w.year}-01-01`, k = addDays(w.prevKey, -77); return y < k ? y : k; };
 
-// the board's deals: Summit's opps table, or the Aspire view turned into the same shape
-// test and sample data from the CRM stays off the board, held in S.excluded so Data Check can count it
+// the board's deals, whatever the source, in one shape. Test and sample data from a CRM or a file stays
+// off the board, held in S.excluded so Data Check can count it. Typed deals carry their stage history.
 function setDeals(data) {
-  let rows = data.opps || [];
+  const cfg = S.cfg, rows = [], ev = {};
   S.excluded = [];
-  if (S.cfg.pipelineSource === 'aspire') {
-    rows = [];
-    for (const r of data.pipeline || []) (isExcluded(S.cfg, r) ? S.excluded : rows).push(fromAspire(S.cfg, r));
+  S.dealShape = data.shape;
+  for (const e of data.events || []) (ev[e.deal_id] = ev[e.deal_id] || []).push({ d: e.d, stage: e.stage });
+  for (const r of data.deals || []) {
+    if (data.shape === 'opps') { rows.push(fromOpp(r)); continue; }
+    const o = data.shape === 'aspire' ? fromAspire(cfg, r) : fromDeal(cfg, r, cfg.source.mode);
+    if (o.readOnly && isExcluded(cfg, r)) { S.excluded.push(o); continue; }
+    if (ev[o.id]) o.stage_events = ev[o.id];
+    rows.push(o);
   }
+  // a CRM's deals in the order its ids run, the order the board has always listed them
+  if (cfg.readOnly) rows.sort((x, y) => (+x.external_id || 0) - (+y.external_id || 0) || String(x.external_id).localeCompare(String(y.external_id)));
   S.opps = Object.fromEntries(rows.map((o) => [o.id, o]));
+  S.dealAccounts = Object.fromEntries((data.dealAccounts || []).map((a) => [a.id, a]));
+  S.changes = data.changes || [];
 }
 
 async function openWorkspace(slug) {
@@ -134,11 +144,11 @@ async function openWorkspace(slug) {
   const row = await api.workspace(slug).catch(() => null);
   // same screen whether the slug does not exist or you are not on it
   if (!row) return renderGate(app, { title: 'Nothing here', body: 'Check the link, or sign in with the email your team uses.' });
-  S.cfg = normalize(row);
+  S.cfg = normalize(row, await api.source(row.id).catch(() => null));
   applyBrand(S.cfg.brand);
   document.title = `Summit · ${S.cfg.name}`;
   const w = wk();
-  const data = await api.load(S.cfg.id, commitsSince(w), S.cfg.pipelineSource);
+  const data = await api.load(S.cfg.id, commitsSince(w), S.cfg.source);
   S.members = data.members;
   S.me = data.members.find((m) => m.user_id === S.user.id && m.active) || null;
   if (!S.me && !S.admin) { teardown(); return renderGate(app, { title: 'Nothing here', body: `Signed in as ${S.user.email || 'this account'}. Check the link, or sign in with the email your team uses.` }); }
@@ -160,29 +170,29 @@ async function openWorkspace(slug) {
     S.live = st === 'SUBSCRIBED' ? 'up' : st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED' ? 'down' : S.live;
     if (was === 'down' && S.live === 'up') refresh();
     if (was !== S.live) renderSoon();
-  });
+  }, S.dealShape === 'board' && !S.cfg.readOnly ? 'board' : 'opps');
 }
 
-// admins only. the function reads Aspire, writes aspire_opps, and logs the run
+// admins only. the function reads the CRM, writes deals, and logs the run
 async function syncNow(full) {
   S.syncing = true; renderAll();
   try {
-    const r = await api.runSync(full);
+    const r = await api.runSync(full, S.cfg.slug);
     const run = r?.run || {};
     toast(r?.status === 'ok' ? `Synced. ${run.rows_pulled ?? 0} pulled, ${(run.rows_inserted ?? 0) + (run.rows_updated ?? 0)} changed` : `Sync ${r?.status || 'finished'}. See the log`);
   } catch (e) {
     toast(`Sync did not run: ${e.message || e}`);
   }
   S.syncing = false;
-  S.sync = (await api.syncLog(S.cfg.id).catch(() => null)) || S.sync;
-  if (S.cfg.pipelineSource === 'aspire') await refresh();
+  S.sync = (await api.syncLog(S.cfg.id, S.cfg.source).catch(() => null)) || S.sync;
+  if (S.cfg.readOnly) await refresh();
   renderAll();
 }
 
 async function refresh() {
   if (!S.cfg) return;
   try {
-    const data = await api.load(S.cfg.id, commitsSince(wk()), S.cfg.pipelineSource);
+    const data = await api.load(S.cfg.id, commitsSince(wk()), S.cfg.source);
     S.members = data.members;
     setDeals(data);
     S.commits = Object.fromEntries(data.commits.map((c) => [ckey(c.member_id, c.week_key), c]));
@@ -202,11 +212,28 @@ document.addEventListener('visibilitychange', () => {
 // the week rolls over at the lock. re-render every minute so the header stays true.
 setInterval(() => S.cfg && renderSoon(), 60000);
 
+let changesT;
 function onLive(table, type, row, old) {
   if (table === 'opps') {
-    if (S.cfg.pipelineSource === 'aspire') return; // the board reads Aspire. typed opps stay in the table, off the board
+    if (S.dealShape !== 'opps') return; // the board reads deals. typed opps stay in the table, off the board
     if (type === 'DELETE') delete S.opps[old?.id];
     else if (row) S.opps[row.id] = { ...S.opps[row.id], ...row };
+  } else if (table === 'deals') {
+    if (S.cfg.readOnly || S.dealShape !== 'board') return;
+    if (type === 'DELETE') delete S.opps[old?.id];
+    else if (row) {
+      const was = S.opps[row.id], o = fromDeal(S.cfg, row, 'native');
+      o.stage_events = was?.stage_events || [];
+      // a stage change someone else made: today's event, unless this browser already logged it
+      if (o.stage && (!was || was.stage !== o.stage) && !o.stage_events.some((e) => e.d === wk().today && e.stage === o.stage)) o.stage_events = [...o.stage_events, { d: wk().today, stage: o.stage }];
+      S.opps[row.id] = { ...was, ...o };
+    }
+    // the change log follows, a beat later, so a burst of edits reads it once
+    clearTimeout(changesT);
+    changesT = setTimeout(async () => { S.changes = (await api.recentChanges(S.cfg.id).catch(() => null)) || S.changes; renderSoon(); }, 800);
+  } else if (table === 'deal_accounts') {
+    if (type === 'DELETE') delete S.dealAccounts[old?.id];
+    else if (row) S.dealAccounts[row.id] = row;
   } else if (table === 'commits') {
     if (type === 'DELETE') { for (const k in S.commits) if (S.commits[k].id === old?.id) delete S.commits[k]; }
     else if (row) {
@@ -257,6 +284,9 @@ document.addEventListener('submit', async (e) => {
 
 document.addEventListener('change', (e) => {
   const t = e.target;
+  if (t.matches('[data-up-file]')) { if (t.files && t.files[0]) uploadFile(t.files[0]).then(renderAll); return; }
+  if (t.dataset.upMap) { uploadMap(t.dataset.upMap, t.value); return renderAll(); }
+  if (t.dataset.upTick) { uploadTick(t.dataset.upTick, t.checked); return renderAll(); }
   if (t.matches('[data-scope]')) {
     S.scope = t.value;
     try { localStorage.setItem(`summit.scope.${S.cfg.id}`, S.scope); } catch { /* ignore */ }
@@ -308,9 +338,11 @@ document.addEventListener('change', (e) => {
       patch.stage_date = today;
       if (s.bid && !s.hold && s.status === 'open' && !o.bid_date) patch.bid_date = today;
       if (s.status === 'won' && !o.actual_close) patch.actual_close = today;
+      if (s.status === 'lost' && !o.lost_date) patch.lost_date = today;
     }
     if (['next_step', 'next_step_date', 'stage', 'value'].includes(k)) patch.last_activity = today;
     writeOpp(id, patch);
+    if (k === 'account') linkAccount(id, v);
     renderSoon();
   }
 });
@@ -371,6 +403,10 @@ document.addEventListener('click', async (e) => {
     return renderAll();
   }
   if (t.closest('[data-crm-clear]')) { S.crm = null; return renderAll(); }
+  if (t.closest('[data-up-preview]')) { await uploadPreview(); return renderAll(); }
+  if (t.closest('[data-up-apply]')) { if (await uploadApply()) await refresh(); return renderAll(); }
+  if (t.closest('[data-up-clear]')) { uploadClear(); return renderAll(); }
+  if (t.closest('[data-up-remap]')) { uploadRemap(); return renderAll(); }
   const rs = t.closest('[data-sync]');
   if (rs && S.admin && !S.syncing) return syncNow(rs.dataset.sync === 'full');
   const th = t.closest('th[data-sort]');

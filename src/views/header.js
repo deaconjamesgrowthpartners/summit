@@ -1,4 +1,4 @@
-import { S, wk, isLeader, reps, scope, oppsScoped, repsScoped, commitFor, branchList } from '../data/store.js';
+import { S, wk, canSeeAll, reps, scope, oppsScoped, repsScoped, commitFor, branchList } from '../data/store.js';
 import { esc, fmtDate } from '../lib/format.js';
 import { lockLabel } from '../lib/time.js';
 import { rowIssues } from '../lib/rules.js';
@@ -22,7 +22,7 @@ export function renderHeader(el, workspaces = []) {
   const who = S.me ? S.me.full_name : S.user?.email || '';
   const n = issueCount();
   let scopeSel = '';
-  if (isLeader()) {
+  if (canSeeAll()) {
     const sc = scope();
     const opts = [['company', 'All'], ...branchList().map((b) => [`branch:${b}`, `${b} branch`]), ...reps().map((r) => [`member:${r.id}`, r.full_name])];
     scopeSel = `<label>Viewing <select data-scope>${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === sc ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
@@ -37,6 +37,7 @@ export function renderHeader(el, workspaces = []) {
       <div class="who">
         <span class="wk">Week of ${fmtDate(w.start)} to ${fmtDate(w.key)}</span>
         <span class="lock ${w.locked ? 'locked' : ''}">${esc(lockTxt)}</span>
+        <span class="lock src" title="Where the deals on this board come from">${esc(sourceBadge(cfg))}</span>
         ${S.live === 'down' ? '<span class="lock">Reconnecting</span>' : ''}
         ${wsSel}
         <span class="me">${esc(who)}${S.admin && !S.me ? ' · admin' : ''}</span>
@@ -48,4 +49,14 @@ export function renderHeader(el, workspaces = []) {
       ${cfg.tabs.map((t) => `<button class="tab ${t.key === S.view ? 'on' : ''}" data-v="${esc(t.key)}">${esc(t.label)}${t.key === 'datacheck' && n ? `<span class="n">${n}</span>` : ''}</button>`).join('')}
     </nav>
   </div>`;
+}
+
+// one line in the header: where every deal on the board comes from, so nobody has to wonder
+export function sourceBadge(cfg) {
+  const s = cfg.source;
+  if (s.mode === 'native') return 'Deals typed in Summit';
+  const last = (S.sync?.runs || []).find((r) => r.status === 'ok' || r.status === 'partial');
+  const when = last ? new Date(last.finished_at || last.started_at).toLocaleString('en-US', { timeZone: cfg.lock_tz, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  if (s.mode === 'csv') return `Deals from ${s.label}${when ? ` · uploaded ${when}` : ' · nothing uploaded yet'}`;
+  return `Deals from ${cfg.crmLabel}${when ? ` · synced ${when}` : ''}`;
 }

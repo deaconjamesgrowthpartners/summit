@@ -2,8 +2,8 @@
 // cutoff and the read-only rules. The SQL side is checked in aspire-sync-sql.test.js.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runSync, restDb, SYNC_RPCS } from '../supabase/functions/aspire-sync/sync.ts';
-import { aspireClient } from '../supabase/functions/aspire-sync/aspire.ts';
+import { runSync, restDb, SYNC_RPCS, aspireConnector, envCredentials } from '../supabase/functions/source-sync/sync.ts';
+import { aspireClient } from '../supabase/functions/source-sync/aspire.ts';
 
 const ID = 'client-id-xyz', SECRET = 'super-secret-value-123';
 const REPS = ['Greg Hill', 'Kit Fox', 'Matthew Royer', 'Jamy August'];
@@ -48,23 +48,25 @@ function summit({ lastGood = null, refuse = null } = {}) {
     get run() { return run; },
     async rpc(fn, args) {
       calls.push(fn);
-      if (fn === 'aspire_sync_begin') {
+      if (fn === 'source_sync_resolve') return { source_id: 3 };
+      if (fn === 'source_sync_begin') {
         if (refuse) return { error: refuse };
+        assert.equal(args.p_source, 3);
         run = { id: 7, mode: args.p_full || !lastGood ? 'full' : 'incremental', pulled: 0, pages: 0 };
-        return { run_id: 7, mode: run.mode, since: run.mode === 'incremental' ? lastGood : null };
+        return { run_id: 7, mode: run.mode, since: run.mode === 'incremental' ? lastGood : null, connector: 'aspire', credential_ref: 'env:ASPIRE' };
       }
-      if (fn === 'aspire_sync_upsert') {
+      if (fn === 'source_sync_upsert') {
         for (const r of args.p_rows) table.set(r.OpportunityID, r);
         run.pulled += args.p_rows.length; run.pages++;
         return { pulled: args.p_rows.length };
       }
-      if (fn === 'aspire_sync_finish') { Object.assign(run, { status: args.p_status, errors: args.p_errors, notes: args.p_notes, calls: args.p_calls, complete: args.p_complete }); return run; }
+      if (fn === 'source_sync_finish') { Object.assign(run, { status: args.p_status, errors: args.p_errors, notes: args.p_notes, calls: args.p_calls, complete: args.p_complete }); return run; }
       throw new Error('unexpected ' + fn);
     },
   };
 }
-const go = (a, db, { aspire: more = {}, ...extra } = {}) =>
-  runSync({ aspire: { clientId: ID, secret: SECRET, fetch: a.fetch, sleep: async () => {}, ...more }, db, ...extra });
+const go = (a, db, { aspire: more = {}, creds = { CLIENT_ID: ID, CLIENT_SECRET: SECRET }, ...extra } = {}) =>
+  runSync({ connectors: { aspire: aspireConnector({ fetch: a.fetch, sleep: async () => {}, ...more }) }, credentials: () => creds, db, ...extra });
 // no test may reach the network
 globalThis.fetch = async (u) => { throw new Error(`test tried the network: ${u}`); };
 
@@ -165,7 +167,7 @@ test('restDb refuses any function that is not a sync function', async () => {
 
 test('a login failure is logged as an error, with no secret in it', async () => {
   const db = summit();
-  const r = await runSync({ aspire: { clientId: ID, secret: 'wrong', fetch: aspire().fetch, sleep: async () => {} }, db });
+  const r = await go(aspire(), db, { creds: { CLIENT_ID: ID, CLIENT_SECRET: 'wrong' } });
   assert.equal(r.status, 'error');
   assert.match(db.run.errors[0], /Aspire login failed \(401\)/);
   assert.ok(!JSON.stringify(db.run).includes('wrong'));
@@ -188,7 +190,7 @@ test('a page Summit fails to save fails that page, not the run: the rest still l
   const rpc = db.rpc.bind(db);
   let n = 0;
   db.rpc = async (fn, args) => {
-    if (fn === 'aspire_sync_upsert' && ++n === 2) throw new Error('aspire_sync_upsert: canceling statement due to statement timeout');
+    if (fn === 'source_sync_upsert' && ++n === 2) throw new Error('source_sync_upsert: canceling statement due to statement timeout');
     return rpc(fn, args);
   };
   const r = await go(a, db);
@@ -205,13 +207,32 @@ test('the client itself has no way to send anything but GET', () => {
   assert.deepEqual(Object.keys(c).sort(), ['get', 'stats']);
 });
 
-test('the aspire-sync dashboard copy is up to date, has no imports left, and declares each name once', async () => {
+test('the source-sync dashboard copy is up to date, has no imports left, and declares each name once', async () => {
   const { readFileSync } = await import('node:fs');
   const { bundle } = await import('../scripts/bundle-probe.mjs');
-  const b = bundle('aspire-sync');
-  assert.equal(readFileSync(new URL('../supabase/dashboard/aspire-sync.ts', import.meta.url), 'utf8'), b, 'run npm run bundle:probe');
+  const b = bundle('source-sync');
+  assert.equal(readFileSync(new URL('../supabase/dashboard/source-sync.ts', import.meta.url), 'utf8'), b, 'run npm run bundle:probe');
   assert.ok(!/^import /m.test(b), 'no imports left');
   const names = [...b.matchAll(/^(?:export )?(?:async )?(?:const|let|function|type|interface|class) (\w+)/gm)].map((m) => m[1]);
   assert.deepEqual(names.filter((n, i) => names.indexOf(n) !== i), []);
   assert.ok(names.includes('authorize') && names.includes('runSync'));
+});
+
+test('a connector that is not built is logged as an error, never guessed', async () => {
+  const db = summit();
+  const rpc = db.rpc.bind(db);
+  db.rpc = async (fn, args) => (fn === 'source_sync_begin' ? { ...(await rpc(fn, args)), connector: 'hubspot' } : rpc(fn, args));
+  const r = await go(aspire(), db);
+  assert.equal(r.status, 'error');
+  assert.match(db.run.errors[0], /no connector called hubspot is built/);
+  assert.deepEqual(db.calls, ['source_sync_resolve', 'source_sync_begin', 'source_sync_finish']);
+});
+
+test('credentials by reference: env:ASPIRE reads ASPIRE_* secrets, nothing else is read', () => {
+  const env = { ASPIRE_CLIENT_ID: 'id', ASPIRE_CLIENT_SECRET: 'sec', OTHER_CLIENT_ID: 'x' };
+  const c = envCredentials((k) => env[k]);
+  assert.deepEqual(c('env:ASPIRE'), { CLIENT_ID: 'id', CLIENT_SECRET: 'sec' });
+  assert.match(c('vault:aspire').error, /not supported/);
+  assert.match(c(null).error, /not supported/);
+  assert.match(c('env:NOPE').error, /no secrets named NOPE_/);
 });

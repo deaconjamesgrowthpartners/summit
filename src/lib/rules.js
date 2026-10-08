@@ -5,7 +5,7 @@ const NO_STAGE = { name: '', prob: 0, status: 'open', needs_close: false, bid: f
 // a CRM status the workspace config does not list: never open, won or lost, never weighted
 const UNKNOWN = { name: '', prob: 0, status: 'unknown', needs_close: false, bid: false, hold: false };
 
-export const stageOf = (cfg, o) => cfg.stageBy[o.stage] || (o.src === 'aspire' ? UNKNOWN : NO_STAGE);
+export const stageOf = (cfg, o) => cfg.stageBy[o.stage] || (o.readOnly ? UNKNOWN : NO_STAGE);
 export const prob = (cfg, o) => stageOf(cfg, o).prob;
 export const weighted = (cfg, o) => (+o.value || 0) * prob(cfg, o);
 export const isOpen = (cfg, o) => stageOf(cfg, o).status === 'open';
@@ -37,6 +37,19 @@ export function bidsIn(cfg, rows, start, end) {
   return { n: B.length, value: sum(B, est), rows: B, open: part((o) => isOpen(cfg, o)), won: part((o) => isWon(cfg, o)), lost: part((o) => isLost(cfg, o)) };
 }
 
+// the day a deal first reached a stage, or any stage past it that is not lost. Read from its stage
+// history (deal_changes, migration 014). A deal with no history counts its current stage from its
+// stage date, or the day it was created.
+export function reachedOn(cfg, o, stageName) {
+  const at = cfg.stages.findIndex((s) => s.name === stageName);
+  if (at < 0) return null;
+  const past = (name) => { const i = cfg.stages.findIndex((s) => s.name === name); return i >= at && cfg.stages[i].status !== 'lost'; };
+  const ev = o.stage_events && o.stage_events.length ? o.stage_events : o.stage ? [{ d: o.stage_date || createdOf(o), stage: o.stage }] : [];
+  let first = null;
+  for (const e of ev) if (validDate(e.d) && past(e.stage) && (!first || e.d < first)) first = e.d;
+  return first;
+}
+
 // what the board says a set of deals did in a week, for measures marked auto
 export function autoDidRows(cfg, rows, key) {
   const start = addDays(key, -6), end = key, nextStart = addDays(key, 1), nextEnd = addDays(key, 7);
@@ -44,8 +57,8 @@ export function autoDidRows(cfg, rows, key) {
   const won = rows.filter((o) => isWon(cfg, o) && inWeek(o.actual_close || o.stage_date));
   const starts = rows.filter((o) => isWon(cfg, o) && validDate(o.start_date) && o.start_date >= nextStart && o.start_date <= nextEnd);
   let bidsN, bidsV;
-  if (cfg.pipelineSource === 'aspire') {
-    // Aspire sends no bid-sent date. A bid is any opportunity created that week.
+  if (cfg.readOnly ?? cfg.pipelineSource === 'aspire') {
+    // A CRM or a file sends no bid-sent date. A bid is any opportunity created that week.
     const b = bidsIn(cfg, rows, start, end);
     bidsN = b.n; bidsV = b.value;
   } else {
@@ -54,7 +67,13 @@ export function autoDidRows(cfg, rows, key) {
   }
   const src = { bids_count: bidsN, bids_value: bidsV, won_value: sum(won), starts_next_week_value: sum(starts) };
   const out = {};
-  for (const m of cfg.measures) if (m.auto && m.auto in src) out[m.key] = src[m.auto];
+  for (const m of cfg.measures) {
+    if (typeof m.auto === 'string' && m.auto in src) out[m.key] = src[m.auto];
+    else if (m.auto && m.auto.stage_entered) {
+      const hit = rows.filter((o) => inWeek(reachedOn(cfg, o, m.auto.stage_entered)));
+      out[m.key] = m.auto.sum === 'value' ? sum(hit) : hit.length;
+    }
+  }
   return out;
 }
 export const autoDid = (cfg, opps, memberId, key) => autoDidRows(cfg, opps.filter((o) => o.owner_member_id === memberId), key);
@@ -62,7 +81,7 @@ export const autoDid = (cfg, opps, memberId, key) => autoDidRows(cfg, opps.filte
 // where an auto number comes from, said on the screen. Bids from Aspire read differently than the
 // typed bids reps are used to, so the tile says where they come from.
 export const isBidMeasure = (m) => m.auto === 'bids_count' || m.auto === 'bids_value';
-export const autoSource = (cfg, m) => (cfg.pipelineSource === 'aspire' && isBidMeasure(m) ? `from ${cfg.crmLabel}` : 'from board');
+export const autoSource = (cfg, m) => (cfg.readOnly && isBidMeasure(m) ? `from ${cfg.crmLabel}` : 'from board');
 export const bidNote = (cfg) => `Bids count every ${cfg.crmLabel} opportunity created that week, open, won or lost. Not typed. A typed number still overrides.`;
 
 // a goal tile's window: from its start (Jan 1 of the goal period if unset) to its deadline
@@ -99,7 +118,7 @@ export function goalDetail(cfg, t, g, rows, wonThisYear, period, history = rows)
   const isNew = newPropertyTest(cfg, history, start);
   const inWindow = rows.filter((o) => isWon(cfg, o) && isRecurring(cfg, o) && (o.actual_close
     ? o.actual_close >= start && o.actual_close <= deadline
-    : o.src !== 'aspire'));
+    : !o.readOnly));
   const fresh = inWindow.filter(isNew);
   return {
     actual: sum(fresh),
@@ -152,7 +171,7 @@ export function didValue(c, auto, k) {
 }
 export const comValue = (c, k) => (c ? +(c.committed?.[k]) || 0 : 0);
 
-// an Aspire deal: only what can be fixed in Aspire, and only for live work. Open deals, deals
+// a deal from a CRM or a file: only what can be fixed there, and only for live work. Open deals, deals
 // with a status the config does not know, and work won this year. Old won and lost work stays quiet.
 function aspireIssues(cfg, o, today) {
   const iss = [];
@@ -172,7 +191,7 @@ function aspireIssues(cfg, o, today) {
 
 // everything wrong with a row. sev r = red flag, y = yellow
 export function rowIssues(cfg, o, today, crm) {
-  if (o.src === 'aspire') return aspireIssues(cfg, o, today);
+  if (o.readOnly) return aspireIssues(cfg, o, today);
   const iss = [];
   const s = stageOf(cfg, o);
   if (isOpen(cfg, o)) {
