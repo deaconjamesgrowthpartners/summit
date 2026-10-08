@@ -270,3 +270,18 @@ begin
   reset role;
   raise notice 'row level security checks passed';
 end $$;
+
+-- 017: source_sync_now sends the key as apikey too, so the functions gateway lets it through
+\i :mig17
+\i :mig17
+insert into vault.decrypted_secrets (name, decrypted_secret) select 'aspire_sync_key', 'sb_secret_test' where not exists (select 1 from vault.decrypted_secrets where name = 'aspire_sync_key');
+do $$
+declare h jsonb;
+begin
+  perform source_sync_now((select id from deal_sources where connector = 'aspire'), 'manual');
+  select headers into h from net.calls where url like '%/functions/v1/source-sync' order by id desc limit 1;
+  assert h->>'apikey' = (select decrypted_secret from vault.decrypted_secrets where name = 'aspire_sync_key'), 'apikey header sent';
+  assert h->>'Authorization' = 'Bearer ' || (h->>'apikey'), 'Authorization still sent, for the function''s own gate';
+  assert not has_function_privilege('authenticated', 'source_sync_now(bigint, text, boolean)', 'execute'), 'service role only';
+  raise notice 'apikey checks passed';
+end $$;
