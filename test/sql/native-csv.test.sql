@@ -228,3 +228,39 @@ begin
   assert (select command from cron.job where jobname like 'source-sync-%' limit 1) like 'select source_sync_now(%', 'calls source_sync_now';
   raise notice 'cutover checks passed';
 end $$;
+
+-- every table 012 to 016 creates is behind row level security, anon holds nothing on it, and signed-in
+-- users can read but never write the source, the sync log or the snapshots
+do $$
+declare t text; bad text := '';
+begin
+  foreach t in array array['deal_sources', 'deals', 'source_runs', 'deal_snapshots', 'deal_accounts', 'deal_changes'] loop
+    if not (select relrowsecurity from pg_class where oid = ('public.' || t)::regclass) then bad := bad || t || ' has no RLS; '; end if;
+    if has_table_privilege('anon', 'public.' || t, 'select') or has_table_privilege('anon', 'public.' || t, 'insert')
+       or has_table_privilege('anon', 'public.' || t, 'update') or has_table_privilege('anon', 'public.' || t, 'delete') then bad := bad || t || ' open to anon; '; end if;
+    if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = t and cmd = 'SELECT') then bad := bad || t || ' has no read policy; '; end if;
+  end loop;
+  foreach t in array array['deal_sources', 'source_runs', 'deal_snapshots', 'deal_changes'] loop
+    if has_table_privilege('authenticated', 'public.' || t, 'insert') or has_table_privilege('authenticated', 'public.' || t, 'update')
+       or has_table_privilege('authenticated', 'public.' || t, 'delete') then bad := bad || t || ' writable by authenticated; '; end if;
+  end loop;
+  assert bad = '', bad;
+  -- and with the publishable key alone, deal_sources reads nothing
+  set local role anon;
+  begin
+    perform 1 from deal_sources;
+    assert false, 'anon read deal_sources';
+  exception when insufficient_privilege then null; end;
+  reset role;
+  -- a signed-in person who is on no roster sees no workspace's source
+  perform set_config('test.uid', '00000000-0000-0000-0000-0000000000ff', true);
+  set local role authenticated;
+  assert (select count(*) from deal_sources) = 0, 'a stranger reads no sources';
+  reset role;
+  -- a member sees only their own workspace's source
+  perform set_config('test.uid', '00000000-0000-0000-0000-0000000000e2', true);
+  set local role authenticated;
+  assert (select count(*) from deal_sources) = 1, 'a member reads their own source only';
+  reset role;
+  raise notice 'row level security checks passed';
+end $$;
