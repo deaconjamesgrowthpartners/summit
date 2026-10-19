@@ -129,10 +129,28 @@ export async function load(wsId, sinceWeek, src = { mode: 'native', legacy: true
   const extra = {
     sync: await syncLog(wsId, src), targets: await targets(wsId),
     tracking: src.mode !== 'native' ? await trackingSince(wsId) : null,
+    earnedSince: src.mode !== 'native' ? await earnedSince(wsId) : null,
     dealAccounts: native && shape === 'board' ? await dealAccounts(wsId) : [],
     changes: native && shape === 'board' ? await recentChanges(wsId) : [],
   };
   return { members, deals: rows, shape, events, commits, goals, accounts, ...extra };
+}
+// per deal, earned revenue in the period and the day it first advanced a stage (migration 018). null before it runs.
+export async function dealMotion(wsId, from, to) {
+  try {
+    return await all(() => sb.rpc('deal_motion', { p_ws: wsId, p_from: from, p_to: to }).order('deal_id'));
+  } catch {
+    return null;
+  }
+}
+// the first night earned revenue was recorded. null before migration 018, or before its first snapshot.
+export async function earnedSince(wsId) {
+  try {
+    const rows = must(await sb.from('deal_snapshots').select('snap_date').eq('workspace_id', wsId).not('earned', 'is', null).order('snap_date').limit(1));
+    return rows[0]?.snap_date || null;
+  } catch {
+    return null;
+  }
 }
 // stage changes of typed deals, oldest first: { deal_id, d, stage }. null before migration 014.
 export async function stageEvents(wsId) {

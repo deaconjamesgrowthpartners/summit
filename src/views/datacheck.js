@@ -3,7 +3,7 @@ import { monthLabel, monthEnd } from '../lib/period.js';
 import { addDays } from '../lib/format.js';
 import { esc, money, fmtDate } from '../lib/format.js';
 import { lockLabel } from '../lib/time.js';
-import { goalFields } from '../data/workspace.js';
+import { goalFields, nameKey } from '../data/workspace.js';
 import { rowIssues, flag, isUnknown, isOpen } from '../lib/rules.js';
 import { uploadCard } from './upload.js';
 
@@ -97,11 +97,12 @@ function mapCheck(cfg) {
   const unknown = tally(all.filter((o) => isUnknown(cfg, o)), (o) => o.status_name || 'blank');
   const oneTime = tally(all.filter((o) => o.category && !o.category_mapped), (o) => o.category);
   const noDivision = all.filter((o) => !o.category).length;
-  const exNames = tally(ex, (o) => o.account);
+  // a division left off is one line, not every deal in it
+  const exNames = tally(ex, (o) => ((cfg.exclude.divisions || []).includes(nameKey(o.division)) ? `all of ${o.division}` : o.account));
   return `<h3 style="font-size:13px;margin:12px 0 4px">Every deal accounted for</h3>
     <div class="kv"><span>Deals from ${esc(cfg.crmLabel)}</span><b>${all.length + ex.length}</b></div>
-    ${ex.length ? `<div class="kv"><span>Left off as test data: ${exNames.slice(0, 8).map(([k, n]) => `${esc(k)}${n > 1 ? ` (${n})` : ''}`).join(', ')}${exNames.length > 8 ? `, and ${exNames.length - 8} more` : ''}</span><span class="pill n">${ex.length}</span></div>
-      <p class="help">Matched by the exclude list in the workspace's pipeline config. Not in any number on any screen.</p>` : ''}
+    ${ex.length ? `<div class="kv"><span>Left off by the exclude list (test data, and ${esc((cfg.exclude.divisions || []).length ? 'the excluded divisions' : 'nothing else')}): ${exNames.slice(0, 8).map(([k, n]) => `${esc(k)}${n > 1 ? ` (${n})` : ''}`).join(', ')}${exNames.length > 8 ? `, and ${exNames.length - 8} more` : ''}</span><span class="pill n">${ex.length}</span></div>
+      <p class="help">Matched by the exclude list in the workspace's pipeline config: test names and words${(cfg.exclude.divisions || []).length ? `, and every deal in ${esc(cfg.exclude.divisions.map((d) => d.replace(/\b\w/g, (c) => c.toUpperCase())).join(', '))}` : ''}. Not in any number on any screen.</p>` : ''}
     <div class="kv"><span>On the board</span><b>${all.length}</b></div>
     <div class="kv"><span>Counted as open, won or lost</span><b>${all.length - total(unknown)}</b></div>
     ${unknown.length ? `<div class="kv"><span>Status not mapped: ${unknown.map(([k, n]) => `${esc(k)} ${n}`).join(', ')}</span><span class="pill y">${total(unknown)}</span></div>
@@ -114,8 +115,8 @@ function mapCheck(cfg) {
 // Summit tile targets, leadership only. One month and one tile at a time: the company and each
 // branch, for All, Maintenance and Install. The table can hold Enhancement / Net New too; this
 // editor leaves them out on purpose. Blank means no target, and the tile says "no target set".
-const T_METRICS = [['closed', 'Closed contracts'], ['created', 'Pipeline created'], ['forecast', 'Forecast']];
 function targetsCard(cfg, w) {
+  const T_METRICS = [...(cfg.readOnly ? [['earned', 'Earned revenue']] : []), ['closed', 'Closed contracts'], ['created', 'Pipeline created'], ['forecast', 'Forecast']];
   const T_DIVS = cfg.filters.includes('division') ? [['all', 'All'], ['maintenance', cfg.words.maintenance], ['install', cfg.words.install]] : [['all', 'Target']];
   const months = [];
   for (let m = `${w.year}-01-01`, i = 0; i < 15; i++, m = addDays(monthEnd(m), 1)) months.push(m);

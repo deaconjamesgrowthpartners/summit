@@ -25,11 +25,15 @@ export const S = {
   excluded: [],       // CRM deals the workspace's exclude list keeps off the board (test data)
   targets: [],        // Summit tile targets, migration 011
   tracking: null,     // the first status snapshot day: "pipeline advanced" is measurable from here
+  earnedSince: null,  // the first night earned revenue was recorded (migration 018)
+  motion: null,       // deal_motion for the Summit period on screen: { key, ok, earned: Map, advanced: Map }
   syncing: false,
   live: 'connecting',
 };
 
 export const wk = () => weekInfo(S.cfg);
+// set by main: re-render soon, without pulling a field out from under someone typing
+export const ui = { soon: () => {} };
 export const ckey = (memberId, week) => `${memberId}|${week}`;
 export const commitFor = (memberId, week) => S.commits[ckey(memberId, week)] || null;
 

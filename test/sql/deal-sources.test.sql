@@ -52,7 +52,7 @@ begin
   perform aspire_sync_finish(run, 'ok', 2, '[]', '[]', true);
   assert (select count(*) from deals where source_id = src and removed_at is null) = 2, 'complete full pull marks the rest removed';
   assert (select rows_removed from source_runs where id = run) > 0, 'logged';
-  assert (select count(*) from deal_snapshots s join deals d on d.id = s.deal_id where d.source_id = src and s.snap_date = current_date) >= 2, 'snapshot';
+  assert (select count(*) from deal_snapshots s join deals d on d.id = s.deal_id where d.source_id = src and s.snap_date = (now() at time zone 'America/New_York')::date) >= 2, 'snapshot';
 
   -- a CSV source: its own field names, a mapping, and removal only of what a leader confirmed
   insert into deal_sources (workspace_id, mode, label, mapping) values (other, 'csv', 'CSV upload',

@@ -1,22 +1,63 @@
 // The Summit tab's numbers, kept out of the view so they can be tested.
+//   earned    work earned in the period: the change in Aspire's ActualEarnedRevenue between two nights (deal_motion)
 //   closed    contracts won in the period, at what they were won for
 //   created   every deal created in the period, whatever its status now, at its estimate
-//   forecast  won work that has not started yet, starting between tomorrow and the end of the period
+//   forecast  won work still to bill: its billing schedule from this month to the end of the period. A won deal with
+//             no schedule counts in full when it starts, between tomorrow and the end of the period
 // Every number reads the same deals the rest of the board reads, with the same test data left out.
 import { isWon, isOpen, isLost, sum, createdOf, divisionOf } from './rules.js';
-import { inPeriod, monthEnd } from './period.js';
-import { validDate, addDays } from './format.js';
+import { inPeriod, monthEnd, monthsIn } from './period.js';
+import { validDate, addDays, iso } from './format.js';
 
 export const est = (o) => +(o.estimated ?? o.value) || 0;
 const wonValue = (o) => +o.value || 0;
 
+const monthOf = (d) => `${d.slice(0, 7)}-01`;
+
+// a deal's billing schedule as dated lines. Aspire gives a month number only: each lands on the first time that month
+// comes round on or after the contract's start month. null when the deal has no schedule or no start date.
+export function billingLines(o) {
+  if (!Array.isArray(o.billing) || !o.billing.length || !validDate(o.start_date)) return null;
+  const y = +o.start_date.slice(0, 4), m0 = +o.start_date.slice(5, 7);
+  return o.billing.map(([m, amt]) => ({ month: iso(m >= m0 ? y : y + 1, m, 1), amount: +amt || 0 }));
+}
+
+// what a won deal still has to bill inside the period: schedule lines from this month on, each at its share of the
+// month's days that fall in the period (all of it for Month, Quarter and Year). No schedule: all of it, on its start date.
+export function forecastValue(o, p, today) {
+  const lines = billingLines(o);
+  if (!lines) return validDate(o.start_date) && o.start_date > today && o.start_date <= p.end ? wonValue(o) : 0;
+  const share = Object.fromEntries(monthsIn(p).map((x) => [x.month, x.share]));
+  return lines.reduce((a, l) => a + (l.month >= monthOf(today) && share[l.month] ? l.amount * share[l.month] : 0), 0);
+}
+
+// p.motion is deal_motion for the period: { earned: Map(deal id -> earned), advanced: Map(deal id -> day) }
+const earnedOf = (o, p) => p?.motion?.earned?.get(o.id) || 0;
+
 export const METRICS = {
+  earned: { label: 'Earned revenue', value: earnedOf, rows: (cfg, R, p) => R.filter((o) => earnedOf(o, p) !== 0) },
   closed: { label: 'Closed contracts', value: wonValue, rows: (cfg, R, p) => R.filter((o) => isWon(cfg, o) && inPeriod(o.actual_close, p)) },
   created: { label: 'Pipeline created', value: est, rows: (cfg, R, p) => R.filter((o) => inPeriod(createdOf(o), p)) },
-  forecast: { label: 'Forecast', value: wonValue, rows: (cfg, R, p, today) => R.filter((o) => isWon(cfg, o) && validDate(o.start_date) && o.start_date > today && o.start_date <= p.end) },
+  forecast: {
+    label: 'Forecast',
+    value: (o, p, today) => (p && today ? forecastValue(o, p, today) : wonValue(o)),
+    rows: (cfg, R, p, today) => R.filter((o) => isWon(cfg, o) && forecastValue(o, p, today) > 0),
+  },
 };
 export const metricRows = (cfg, metric, R, p, today) => METRICS[metric].rows(cfg, R, p, today);
-export const metricValue = (metric, rows) => sum(rows, METRICS[metric].value);
+export const metricValue = (metric, rows, p, today) => sum(rows, (o) => METRICS[metric].value(o, p, today));
+
+// won work still to bill, all of it: schedule lines from this month on, and unscheduled work not started yet
+export function forecastRemaining(cfg, rows, today) {
+  let total = 0;
+  for (const o of rows) {
+    if (!isWon(cfg, o)) continue;
+    const lines = billingLines(o);
+    if (lines) total += lines.reduce((a, l) => a + (l.month >= monthOf(today) ? l.amount : 0), 0);
+    else if (validDate(o.start_date) && o.start_date > today) total += wonValue(o);
+  }
+  return total;
+}
 
 // the Maintenance / Install and Enhancement / Net New filters
 export function filterDeals(cfg, rows, { division = 'all', kind = 'all' }, isNew) {
@@ -45,15 +86,23 @@ export function renewalsIn(cfg, rows, p) {
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : wonValue(b.o) - wonValue(a.o)));
 }
 
-// won work not started yet, by start month, for the next n months from today
+// won work still to bill, by month, for the next n months from this one: each schedule line in its month, and
+// unscheduled work in its start month. n counts the deals billing that month.
 export function forecastByMonth(cfg, rows, today, n = 12) {
   const out = [];
-  let m = `${today.slice(0, 7)}-01`;
+  let m = monthOf(today);
   for (let i = 0; i < n; i++) { out.push({ month: m, n: 0, value: 0 }); m = addDays(monthEnd(m), 1); }
+  const at = Object.fromEntries(out.map((b) => [b.month, b]));
   for (const o of rows) {
-    if (!isWon(cfg, o) || !validDate(o.start_date) || o.start_date <= today) continue;
-    const b = out.find((x) => x.month === `${o.start_date.slice(0, 7)}-01`);
-    if (b) { b.n++; b.value += wonValue(o); }
+    if (!isWon(cfg, o)) continue;
+    const lines = billingLines(o);
+    if (lines) {
+      const hit = new Set();
+      for (const l of lines) if (at[l.month] && l.amount) { at[l.month].value += l.amount; hit.add(l.month); }
+      for (const k of hit) at[k].n++;
+    } else if (validDate(o.start_date) && o.start_date > today && at[monthOf(o.start_date)]) {
+      at[monthOf(o.start_date)].n++; at[monthOf(o.start_date)].value += wonValue(o);
+    }
   }
   return out;
 }

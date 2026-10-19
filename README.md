@@ -46,6 +46,9 @@ Env (optional, the publishable key and URL are the defaults):
    - `014_native_deals.sql`: typed deals, the change log, the account list, the viewer role.
    - `015_workspaces_29029_deacon_james.sql`: the two workspaces with no CRM. Config only.
    - `016_source_sync_cutover.sql`: only after `source-sync` is deployed and has run once. Moves the nightly job.
+   - `017_source_sync_apikey.sql`: `source_sync_now` sends the `apikey` header the functions gateway now asks for.
+   - `018_summit_earned_advanced.sql`: earned revenue snapshots, Delivered as a proposal, stage ranks, Indirect off the
+     board, the billing schedule on each deal, and `deal_motion()` for earned and advanced in a period.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
@@ -222,12 +225,19 @@ week, Wednesday to Tuesday, the same week The Climb and the commit lock use. The
   won date if won, before it was created otherwise). Everything else is Enhancement.
 
 Tiles, each against its target:
+- Earned revenue: work earned in Aspire in the period. Aspire's ActualEarnedRevenue is cumulative to date, so the sync
+  snapshots it nightly (018) and the tile counts the change between nights, from the first snapshot on (Oct 19). It is
+  not invoices: the /Invoices sync replaces it as the earned number. CRM workspaces only.
 - Closed contracts: won dollars, by won date.
-- Pipeline created: every deal created in the period, whatever its status now, at its estimate. Split open / won / lost.
-- Forecast: won work not started yet, starting by the end of the period. Unearned revenue.
-- Earned revenue: "not connected yet" until Aspire invoices are synced.
-- Pipeline advanced: not counted. Aspire keeps no stage history, so the sync now snapshots every deal's status each night;
-  the tile says the date tracking started.
+- Pipeline: every deal created in the period, whatever its status now, at its estimate, split open / won / lost. Under it,
+  the deals that advanced a stage: reached a higher rung of Aspire's ladder (Pre Bid, Estimate, Propose, Won) than any
+  night before, read from the nightly status snapshots since Oct 2. Typed deals use their own stage history.
+- Forecast: won work still to bill, from each contract's Aspire billing schedule (OpportunityBillings), this month to the
+  end of the period. Aspire gives a month number only; each lands the first time it comes round from the contract start.
+  Won work with no schedule counts in full in the month it starts. Unearned revenue.
+
+Aspire's Delivered status is a proposal out (stage Propose, no won date), so it counts as open, a bid, weighted 0.8.
+`pipeline.exclude.divisions` leaves whole divisions off every tile (Indirect for Elevation); Data Check counts them.
 
 Under the tiles: every branch side by side, with a "not on roster" row per branch carrying the Aspire names, so the
 rows add up to the tiles. Click a tile or a branch number for the deals behind it. Then renewals in the period

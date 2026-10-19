@@ -1,5 +1,5 @@
 import './styles/base.css';
-import { S, wk, ckey, isLeader, memberById, pickGoals, tabFor } from './data/store.js';
+import { S, wk, ckey, isLeader, memberById, pickGoals, tabFor, ui } from './data/store.js';
 import { normalize } from './data/workspace.js';
 import { writeOpp, writeCommit, writeGoal, writeAccount, writeTarget, addOpp, acceptLate, onSaved, linkAccount } from './data/writes.js';
 import { $, toast, num, addDays } from './lib/format.js';
@@ -63,6 +63,7 @@ function renderSoon() {
   });
 }
 onSaved(renderSoon);
+ui.soon = renderSoon;
 
 /* ---------------- boot ---------------- */
 async function boot() {
@@ -85,7 +86,7 @@ async function boot() {
 function teardown() {
   if (unsub) unsub();
   unsub = null;
-  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, dealShape: 'opps', commits: {}, accounts: {}, dealAccounts: {}, changes: [], upload: null, goalsRow: null, filters: {}, sort: {}, crm: null, sync: null, syncing: false, excluded: [], targets: [], tracking: null });
+  Object.assign(S, { cfg: null, me: null, admin: false, members: [], opps: {}, dealShape: 'opps', commits: {}, accounts: {}, dealAccounts: {}, changes: [], upload: null, goalsRow: null, filters: {}, sort: {}, crm: null, sync: null, syncing: false, excluded: [], targets: [], tracking: null, earnedSince: null, motion: null, motionLoading: null });
   applyBrand({});
 }
 
@@ -159,6 +160,8 @@ async function openWorkspace(slug) {
   S.sync = data.sync || null;
   S.targets = data.targets || [];
   S.tracking = data.tracking || null;
+  S.earnedSince = data.earnedSince || null;
+  S.motion = null;
   S.scope = 'company';
   try { const sc = localStorage.getItem(`summit.scope.${S.cfg.id}`); if (sc) S.scope = sc; } catch { /* private mode */ }
   const want = tabFromUrl();
@@ -201,6 +204,8 @@ async function refresh() {
     S.sync = data.sync || S.sync;
     S.targets = data.targets || S.targets;
     S.tracking = data.tracking || S.tracking;
+    S.earnedSince = data.earnedSince || S.earnedSince;
+    S.motion = null; // earned and advanced read again for the period on screen
     renderSoon();
   } catch { /* try again next time */ }
 }

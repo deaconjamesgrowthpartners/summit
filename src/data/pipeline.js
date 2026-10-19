@@ -27,6 +27,8 @@ export function categoryFor(cfg, division) {
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function isExcluded(cfg, r) {
   const ex = cfg.exclude || { names: [], words: [] };
+  const div = nameKey(r.division_name ?? r.division);
+  if (div && (ex.divisions || []).includes(div)) return true;
   const prop = r.property_name ?? r.account, opp = r.opportunity_name ?? r.job;
   r = { property_name: prop, opportunity_name: opp };
   const names = [r.property_name, r.opportunity_name].map(nameKey);
@@ -44,7 +46,7 @@ export const aspireToBoard = (r) => ({
   rep_name: r.sales_rep_name, member_id: r.member_id, branch: r.branch_name, division: r.division_name, stage: r.status_name,
   value_estimated: r.estimated_dollars, value_won: r.won_dollars, close_date: r.anticipated_close_date, start_date: r.start_date,
   won_date: r.won_date, lost_date: r.lost_date, ext_modified_at: r.aspire_modified_at, created_date: r.created_date,
-  end_date: r.end_date, renewal_date: r.renewal_date,
+  end_date: r.end_date, renewal_date: r.renewal_date, billing: r.billing,
 });
 
 export function fromAspire(cfg, r) {
@@ -93,6 +95,8 @@ export function fromDeal(cfg, r, mode = 'native') {
     created_date: day(r.created_date),
     end_date: day(r.end_date),
     renewal_date: day(r.renewal_date),
+    // migration 018: the billing schedule, [month number, amount] pairs. null before it runs, or with no schedule.
+    billing: Array.isArray(r.billing) && r.billing.length ? r.billing : null,
   };
 }
 

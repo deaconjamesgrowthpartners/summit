@@ -94,6 +94,8 @@ export function normalize(ws, src = null) {
   const exclude = {
     names: arr(ex.names).map(nameKey).filter(Boolean),
     words: arr(ex.words).map((w) => String(w).trim()).filter(Boolean),
+    // whole divisions off the board, by name: Indirect for Elevation
+    divisions: arr(ex.divisions).map(nameKey).filter(Boolean),
   };
   // win rate: properties (a property once a year), deals (every record), or off
   const winRate = ['properties', 'deals', 'off'].includes(pl.win_rate) ? pl.win_rate : 'deals';

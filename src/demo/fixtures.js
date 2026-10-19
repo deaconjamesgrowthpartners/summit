@@ -57,12 +57,13 @@ const WS = {
 export const ASPIRE_PIPELINE = {
   source: 'aspire',
   statuses: [
-    { name: 'New', status: 'open', prob: 0.1 },
-    { name: 'Bidding', status: 'open', prob: 0.4, needs_close: true },
-    { name: 'Pending Approval', status: 'open', prob: 0.6, needs_close: true, bid: true },
-    { name: 'Approved', status: 'open', prob: 0.8, needs_close: true, bid: true },
-    { name: 'Won', status: 'won', prob: 1 },
-    { name: 'Delivered', status: 'won', prob: 1 },
+    { name: 'New', status: 'open', prob: 0.1, rank: 1 },
+    { name: 'Bidding', status: 'open', prob: 0.4, needs_close: true, rank: 2 },
+    { name: 'Pending Approval', status: 'open', prob: 0.6, needs_close: true, bid: true, rank: 2 },
+    { name: 'Approved', status: 'open', prob: 0.8, needs_close: true, bid: true, rank: 2 },
+    { name: 'Won', status: 'won', prob: 1, rank: 4 },
+    // migration 018: a proposal out, not sold work
+    { name: 'Delivered', status: 'open', prob: 0.8, needs_close: true, bid: true, rank: 3 },
     { name: 'Lost', status: 'lost', prob: 0 },
   ],
   divisions: [
@@ -72,7 +73,7 @@ export const ASPIRE_PIPELINE = {
   ],
   win_rate: 'properties',
   new_maintenance_basis: 'new_properties',
-  exclude: { names: ['John Test Property', 'Test All Out Door', 'Billy Bob Residence TEST'], words: ['test', 'sample'] },
+  exclude: { names: ['John Test Property', 'Test All Out Door', 'Billy Bob Residence TEST'], words: ['test', 'sample'], divisions: ['Indirect'] },
 };
 
 // the 5 test rows, same addresses and teams as migration 003
@@ -195,6 +196,15 @@ export function fixtures(now = new Date()) {
     if (!x.won_date || r() < 0.08) return;
     x.end_date = addDays(x.won_date, x.division_name.includes('Maintenance') ? 365 : 120);
     if (r() < 0.45) x.renewal_date = addDays(x.end_date, -30);
+  });
+  // billing schedules, as deal_board gives them (migration 018): maintenance bills monthly for a year from its start,
+  // most install work half at the start and half the month after
+  pipeline.forEach((x) => {
+    if (!x.won_date || !x.start_date || r() < 0.1) return;
+    const m0 = +x.start_date.slice(5, 7), amt = +x.won_dollars || 0;
+    x.billing = x.division_name.includes('Maintenance')
+      ? Array.from({ length: 12 }, (_, i) => [((m0 - 1 + i) % 12) + 1, Math.round((amt / 12) * 100) / 100])
+      : r() < 0.7 ? [[m0, Math.round(amt / 2)], [(m0 % 12) + 1, amt - Math.round(amt / 2)]] : null;
   });
   // PropertyID by property, the way Aspire keys them
   const pid = {};

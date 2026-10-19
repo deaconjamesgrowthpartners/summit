@@ -1,4 +1,4 @@
-import { S, wk, goals, isCompany, scope, scopeLabel, oppsScoped, oppsAll, repsScoped, commitFor, tabFor, accountsScoped, branchList, fromCrm, sourceNote, byBranch as splitByBranch } from '../data/store.js';
+import { S, wk, ui, goals, isCompany, scope, scopeLabel, oppsScoped, oppsAll, repsScoped, commitFor, tabFor, accountsScoped, branchList, fromCrm, sourceNote, byBranch as splitByBranch } from '../data/store.js';
 import { repCell, renderGrid, canEditOpp } from './grid.js';
 import { repLines } from './team.js';
 import { repScore } from './climb.js';
@@ -8,12 +8,29 @@ import { esc, money, pct, fmtDate, daysBetween, validDate, addDays, dow } from '
 import { mLabel } from '../data/workspace.js';
 import { isOpen, isWon, isUnknown, isRecurring, weighted, bidOut, sum, ryg, goalDetail, netNewTest, isBidMeasure, bidNote } from '../lib/rules.js';
 import { periodRange, weeksIn, monthsIn, monthLabel, targetFor } from '../lib/period.js';
-import { METRICS, metricRows, metricValue, filterDeals, split, renewalsIn, forecastByMonth, branchGroups, repGroups, repBreakdown, advancedIn } from '../lib/summit.js';
+import { METRICS, metricRows, metricValue, filterDeals, split, renewalsIn, forecastByMonth, forecastRemaining, branchGroups, repGroups, repBreakdown, advancedIn } from '../lib/summit.js';
 
 const tile = (cls, l, v, s, extra = '', attrs = '') =>
   `<div class="tile ${cls}" ${attrs}><span class="stripe"></span><div class="l">${l}</div><div class="v">${v}</div>${extra}${s ? `<div class="s">${s}</div>` : ''}</div>`;
 
-const TILE_METRICS = ['closed', 'created', 'forecast'];
+// earned and advanced for the period on screen, from deal_motion (migration 018). Read once per period, then kept
+// until the next refresh. null while it loads; { ok: false } before 018 runs.
+function motionFor(p) {
+  const key = `${S.cfg.id}|${p.start}|${p.end}`;
+  if (S.motion && S.motion.key === key) return S.motion;
+  if (S.motionLoading !== key) {
+    S.motionLoading = key;
+    S.api.dealMotion(S.cfg.id, p.start, p.end).then((rows) => {
+      if (S.motionLoading !== key) return;
+      S.motionLoading = null;
+      S.motion = rows === null ? { key, ok: false, earned: new Map(), advanced: new Map() }
+        : { key, ok: true, earned: new Map(rows.map((r) => [String(r.deal_id), +r.earned || 0])),
+            advanced: new Map(rows.filter((r) => r.advanced_on).map((r) => [String(r.deal_id), r.advanced_on])) };
+      ui.soon();
+    });
+  }
+  return null;
+}
 
 // the target for the scope on screen: the whole company, one branch, or none for a single rep
 function scopeTarget(metric, f, p) {
@@ -29,13 +46,17 @@ export function renderSummit(el) {
   const KINDS = [['all', 'All'], ['enhancement', W.enhancement], ['netnew', W.netnew]];
   const f = { division: hasDiv ? S.filters.sum_div || 'all' : 'all', kind: hasKind ? S.filters.sum_kind || 'all' : 'all' };
   const kind = S.filters.sum_period || 'month';
-  const p = periodRange(kind, w);
+  const p0 = periodRange(kind, w);
+  // a CRM's earned revenue and stage moves come from the nightly snapshots. Typed deals carry their own stage history.
+  const mo = crm ? motionFor(p0) : null;
+  const p = { ...p0, motion: mo };
+  const TILE_METRICS = crm ? ['earned', 'closed', 'created', 'forecast'] : ['closed', 'created', 'forecast'];
   // net new: the property had no won deal before this one. History is every deal, whatever the scope.
   const isNew = netNewTest(cfg, oppsAll());
   const R = filterDeals(cfg, oppsScoped(), f, isNew);
   const M = Object.fromEntries(TILE_METRICS.map((k) => {
     const rows = metricRows(cfg, k, R, p, w.today);
-    return [k, { rows, value: metricValue(k, rows), target: scopeTarget(k, f, p) }];
+    return [k, { rows, value: metricValue(k, rows, p, w.today), target: scopeTarget(k, f, p) }];
   }));
   const drill = S.filters.sum_drill || '';
   const onDrill = (k) => (drill === `${k}|` ? 'on' : '');
@@ -48,21 +69,33 @@ export function renderSummit(el) {
   const cl = M.closed, cr = M.created, fc = M.forecast;
   const clT = vsTarget(cl.value, cl.target), crT = vsTarget(cr.value, cr.target), fcT = vsTarget(fc.value, fc.target);
   const crSplit = split(cfg, cr.rows);
-  const unstarted = R.filter((o) => METRICS.forecast.rows(cfg, [o], { end: '9999-12-31' }, w.today).length);
+  const toBill = forecastRemaining(cfg, R, w.today);
   const wonNoStart = R.filter((o) => cfg.stageBy[o.stage]?.status === 'won' && !validDate(o.start_date) && validDate(o.actual_close) && o.actual_close >= `${w.year}-01-01`);
-  const since = S.tracking;
-  const adv = crm ? [] : advancedIn(cfg, R, p);
+  const since = S.tracking, eSince = S.earnedSince;
+  // advanced a stage in the period: a CRM's from the nightly snapshots, typed deals from their own history
+  const adv = crm ? (mo?.ok ? R.filter((o) => mo.advanced.has(o.id)) : []) : advancedIn(cfg, R, p);
+  const advLine = crm && !mo ? 'Advanced a stage: loading'
+    : crm && !mo.ok ? `Advanced a stage: counted once migration 018 runs${since ? `. Status tracked since ${fmtDate(since)}` : ''}`
+    : `<button type="button" class="lnk" data-drill="advanced|">Advanced a stage: ${adv.length} deals · ${money(sum(adv))}</button>${crm && since && p.start < since ? ` <small>counted from ${fmtDate(since)}</small>` : ''}`;
+  let earnedTile = '';
+  if (crm) {
+    const er = M.earned;
+    if (!mo) earnedTile = tile('', 'Earned revenue', '...', 'Reading the nightly snapshots');
+    else if (!mo.ok || !eSince) earnedTile = tile('off', 'Earned revenue', 'Not tracked yet', `Work earned in ${esc(cfg.crmLabel)}, counted from the first nightly snapshot after migration 018.`);
+    else {
+      const t = vsTarget(er.value, er.target);
+      earnedTile = tile(`${t.cls} click ${onDrill('earned')}`, 'Earned revenue', t.v,
+        `${t.s} · work earned in ${esc(cfg.crmLabel)}, tracking since ${fmtDate(eSince)}${p.start < eSince ? ` · counts from ${fmtDate(eSince)} only` : ''} · ${er.rows.length} deals`, '', attrs('earned'));
+    }
+  }
   const tilesHtml = [
+    earnedTile,
     tile(`${clT.cls} click ${onDrill('closed')}`, 'Closed contracts', clT.v,
       `${clT.s} · ${cl.rows.length} contracts${hasDiv ? ` · ${money(sum(cl.rows.filter((o) => isRecurring(cfg, o))))} ${esc(W.maintenance.toLowerCase())}` : ''}`, '', attrs('closed')),
-    tile(`${crT.cls} click ${onDrill('created')}`, 'Pipeline created', crT.v, `${crT.s} · ${cr.rows.length} deals`,
+    tile(`${crT.cls} click ${onDrill('created')}`, 'Pipeline', crT.v, `${crT.s} · ${cr.rows.length} deals created<div class="src">${advLine}</div>`,
       `<div class="split3"><span>${crSplit.open.n} open ${money(crSplit.open.value)}</span><span>${crSplit.won.n} won ${money(crSplit.won.value)}</span><span>${crSplit.lost.n} lost ${money(crSplit.lost.value)}</span>${crSplit.other.n ? `<span>${crSplit.other.n} status not mapped</span>` : ''}</div>`, attrs('created')),
     tile(`${fcT.cls} click ${onDrill('forecast')}`, 'Forecast', fcT.v,
-      `${fcT.s} · won, starting by ${fmtDate(p.end)} · ${money(sum(unstarted))} won and not started in all${wonNoStart.length ? ` · ${wonNoStart.length} won this year with no start date` : ''}`, '', attrs('forecast')),
-    crm ? tile('off', 'Earned revenue', 'Not connected yet', `Needs the ${esc(cfg.crmLabel)} Invoices sync, a separate piece of work. Not $0, just not here yet.`) : '',
-    crm ? tile('off', 'Pipeline advanced', since ? `Tracking since ${fmtDate(since)}` : `Starts with the next ${cfg.source.mode === 'csv' ? 'upload' : 'sync'}`,
-      `${esc(cfg.crmLabel)} keeps no stage history. Summit records every deal's status ${cfg.source.mode === 'csv' ? 'on each upload' : 'nightly'}, so this counts from ${since ? fmtDate(since) : 'the first snapshot'} forward.`)
-      : tile(`click ${onDrill('advanced')}`, 'Pipeline advanced', String(adv.length), `${money(sum(adv))} · deals that moved forward a stage in ${esc(p.label)}`, '', attrs('advanced')),
+      `${fcT.s} · won work still to bill by ${fmtDate(p.end)} · ${money(toBill)} still to bill in all${wonNoStart.length ? ` · ${wonNoStart.length} won this year with no start date` : ''}`, '', attrs('forecast')),
   ].join('');
 
   // by branch: every deal on one row, the rows add up to the tiles
@@ -71,10 +104,10 @@ export function renderSummit(el) {
   const groups = byBranch ? branchGroups(R, branchList()).filter((g) => g.rows.length || (!g.unassigned && g.branch && (company || sc === `branch:${g.branch}`)))
     : repGroups(R, repsScoped()).filter((g) => g.rows.length || company || sc === `member:${g.key.slice(2)}`);
   const cellFor = (g, k) => {
-    const rows = metricRows(cfg, k, g.rows, p, w.today), v = metricValue(k, rows);
+    const rows = metricRows(cfg, k, g.rows, p, w.today), v = metricValue(k, rows, p, w.today);
     const t = byBranch && !g.unassigned && g.branch && !sc.startsWith('member:') ? targetFor(S.targets || [], { metric: k, division: f.division, kind: f.kind, branch: g.branch }, p) : null;
     const key = `${k}|${g.key}`;
-    return `<td class="num"><button type="button" class="cellbtn ${drill === key ? 'on' : ''}" data-drill="${esc(key)}"><b>${money(v)}</b>${t != null ? `<small class="m"> / ${money(t)}</small>` : ''}<small class="m"> ·${rows.length}</small></button>${g.unassigned ? repLines(repBreakdown(rows, METRICS[k].value), 3) : ''}</td>`;
+    return `<td class="num"><button type="button" class="cellbtn ${drill === key ? 'on' : ''}" data-drill="${esc(key)}"><b>${money(v)}</b>${t != null ? `<small class="m"> / ${money(t)}</small>` : ''}<small class="m"> ·${rows.length}</small></button>${g.unassigned ? repLines(repBreakdown(rows, (o) => METRICS[k].value(o, p, w.today)), 3) : ''}</td>`;
   };
   const label = (g) => (g.person ? `<span class="person">${esc(g.branch)}</span>` : !byBranch ? '<b>No rep</b>'
     : g.unassigned ? `<b>${esc(g.branch)}</b> <span class="pill n">not on roster</span>` : `<b>${g.branch ? esc(g.branch) : 'No branch'}</b>`);
@@ -93,8 +126,8 @@ export function renderSummit(el) {
     const [k, ...rest] = drill.split('|'), gk = rest.join('|');
     const g = gk ? groups.find((x) => x.key === gk) : null;
     const base = g ? g.rows : R;
-    const rows = k === 'renewals' ? ren.map((x) => x.o) : k === 'advanced' ? adv : METRICS[k] ? metricRows(cfg, k, base, p, w.today) : [];
-    const val = k === 'renewals' || k === 'advanced' ? sum(rows) : METRICS[k] ? metricValue(k, rows) : 0;
+    const rows = k === 'renewals' ? ren.map((x) => x.o) : k === 'advanced' ? adv.filter((o) => base.includes(o)) : METRICS[k] ? metricRows(cfg, k, base, p, w.today) : [];
+    const val = k === 'renewals' || k === 'advanced' ? sum(rows) : METRICS[k] ? metricValue(k, rows, p, w.today) : 0;
     const title = k === 'renewals' ? 'Renewals' : k === 'advanced' ? 'Pipeline advanced' : METRICS[k]?.label || '';
     const where = g ? `${g.branch || (byBranch ? 'No branch' : 'No rep')}${g.unassigned && byBranch ? ', not on roster' : ''}` : scopeLabel();
     drillHtml = `<div class="sec" id="drill"><div class="sec-h"><h2 class="s16">${esc(title)} · ${esc(where)} · ${esc(p.label)} · ${rows.length} deals · ${money(val)}</h2><button class="lnk" data-drill="${esc(drill)}">Close</button></div>
@@ -194,9 +227,9 @@ export function renderSummit(el) {
       ${renEnd ? `<p class="note">${renEnd} of ${ren.length} use the end date, because ${esc(cfg.crmLabel)} has no renewal date on them.</p>` : ''}
     </div>`}
     <div class="card">
-      <div class="sec-h"><h2 class="s16">Forecast · won work by start month</h2><span class="sub">not started yet · ${money(sum(unstarted))}</span></div>
+      <div class="sec-h"><h2 class="s16">Forecast · won work still to bill, by month</h2><span class="sub">${money(toBill)} in all</span></div>
       ${fMonths.map((m) => `<div class="kv"><span>${esc(monthLabel(m.month))}</span><b>${money(m.value)} <small class="m">·${m.n}</small></b></div>`).join('')}
-      <p class="note">Unearned: signed, not started. It turns into earned revenue once invoices are connected.</p>
+      <p class="note">Unearned: signed, not billed yet. Each contract's billing schedule in ${esc(cfg.crmLabel)}, month by month. Won work with no schedule counts in full in the month it starts.</p>
     </div>
   </div>
 

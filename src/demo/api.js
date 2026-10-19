@@ -78,8 +78,34 @@ export async function load(wsId, _since, src = {}) {
     members: db.members.filter((m) => m.workspace_id === wsId), deals: W.deals.filter((x) => !x.removed), shape: 'board', events: native ? W.events : null,
     commits: db.commits.filter((c) => (c.workspace_id || ELEV.id) === wsId), goals: wsId === ELEV.id ? db.goals : [],
     accounts: wsId === ELEV.id ? db.accounts : [], sync: W.sync, targets: wsId === ELEV.id ? db.targets : [],
-    tracking: src.mode !== 'native' ? db.tracking : null, dealAccounts: W.accounts, changes: W.changes,
+    tracking: src.mode !== 'native' ? db.tracking : null, earnedSince: src.mode !== 'native' ? demoEarnedSince() : null,
+    dealAccounts: W.accounts, changes: W.changes,
   });
+}
+// deal_motion, made up: won work earns evenly across its year from its start, a seventh of open and won deals moved
+// up a stage on a day the hash picks. Only from the first earned night on, like the real thing.
+const dayN = (d) => Math.floor(Date.parse(`${d}T00:00:00Z`) / 864e5);
+const hash = (s) => [...String(s)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+export const demoEarnedSince = () => new Date(clock.now().getTime() - 12 * 864e5).toISOString().slice(0, 10);
+export async function dealMotion(wsId, from, to) {
+  const W = ws[wsId];
+  if (!W || W.source.mode === 'native') return [];
+  const since = demoEarnedSince(), today = clock.now().toISOString().slice(0, 10);
+  const lo = dayN([from, since].sort()[1]), hi = dayN([to, today].sort()[0]);
+  const out = [];
+  for (const d of W.deals) {
+    if (d.removed) continue;
+    const won = /^won$/i.test(d.stage || ''), id = d.deal_id;
+    let earned = 0;
+    if (won && d.start_date && +d.value_won) {
+      const a = Math.max(lo, dayN(d.start_date)), days = hi - a + 1;
+      if (days > 0) earned = Math.round((+d.value_won / 365) * days * 100) / 100;
+    }
+    const h = hash(id);
+    const adv = hi >= lo && h % 7 === 0 && d.stage && !/lost/i.test(d.stage) ? new Date((lo + (h % (hi - lo + 1))) * 864e5).toISOString().slice(0, 10) : null;
+    if (earned || adv) out.push({ deal_id: id, earned, advanced_on: adv });
+  }
+  return clone(out);
 }
 export async function syncLog(wsId) { return clone(ws[wsId]?.sync || null); }
 export async function recentChanges(wsId) { return clone((ws[wsId]?.changes || []).slice(0, 40)); }
