@@ -5,6 +5,8 @@ import { mLabel, teamMeasures } from '../data/workspace.js';
 import { lockLabel, isLockedWeek } from '../lib/time.js';
 import { isOpen, isWon, stageOf, ryg, autoDid, autoDidRows, didValue, comValue, hasVal, flag, sum, autoSource, isBidMeasure, bidNote } from '../lib/rules.js';
 import { repBreakdown } from '../lib/summit.js';
+import { netNewTest } from '../lib/rules.js';
+import { teamDealTest, dealBranchRows } from '../lib/teamcard.js';
 import { renderGrid, canEditOpp } from './grid.js';
 import { renderBook } from './book.js';
 
@@ -55,7 +57,17 @@ export function renderTeam(el, tab) {
   const branchRows = [];
   const byBranch = splitByBranch();
   // without branches, each rep is a row of their own
-  const keys = byBranch ? [...(crmMode ? branchList() : cfg.branches), ...(unassigned.some((o) => !o.branch) ? [''] : [])] : rr.map((x) => `m:${x.id}`);
+  // a tab that counts deals by kind (Grow: existing clients, Net New: new properties) builds its rows from the deals,
+  // each in its own CRM branch, whoever sold it. Typed numbers and commitments still come from the team's reps.
+  const inTeam = crmMode && byBranch ? teamDealTest(tab, netNewTest(cfg, opps)) : null;
+  const byDeal = !!inTeam;
+  if (byDeal) {
+    for (const x of dealBranchRows(cfg, { branches: branchList(), deals: oppsScoped(), reps: rr, inTeam, week: w.scoreKey, commitOf: commitFor, autoRows: autoDidRows })) {
+      const rv = ratio && x.t[ratio.den]?.d ? x.t[ratio.num].d / x.t[ratio.den].d : 0;
+      branchRows.push({ ...x, b: x.b, rv, den: ratio ? x.t[ratio.den]?.d || 0 : 0 });
+    }
+  }
+  const keys = byDeal ? [] : byBranch ? [...(crmMode ? branchList() : cfg.branches), ...(unassigned.some((o) => !o.branch) ? [''] : [])] : rr.map((x) => `m:${x.id}`);
   for (const b of keys) {
     const rs = !byBranch ? rr.filter((x) => `m:${x.id}` === b) : b ? rr.filter((x) => x.branch === b) : [];
     const U = unassigned.filter((o) => (b ? o.branch === b : !o.branch));
@@ -113,9 +125,10 @@ export function renderTeam(el, tab) {
       <div class="tw flat"><table><thead><tr><th>${byBranch ? 'Branch' : 'Rep'}</th>${bm.map((m) => `<th class="num">${esc(lab(m))}</th>`).join('')}${ratio ? `<th class="num">${esc(ratio.label)}</th>` : ''}${crmMode ? '<th class="num">Open $</th>' : ''}</tr></thead><tbody>
       ${branchRows.map((x) => x.unassigned
         ? `<tr class="unas"><td><b>${x.b ? esc(x.b) : 'No branch'}</b> <span class="pill n">not on roster</span>${repLines(x.reps, 4, 'open')}</td>${bm.map((m) => `<td class="num">${x.t[m.key] ? fmtM(m, x.t[m.key].d) : '<span class="m">—</span>'}</td>`).join('')}${ratio ? '<td class="num"><span class="m">—</span></td>' : ''}<td class="num">${money(x.open)}<small class="m"> ·${x.openN}</small></td></tr>`
-        : `<tr><td>${x.person ? `<span class="person">${esc(x.b)}</span>` : `<b>${esc(x.b)}</b>`}</td>${bm.map((m) => `<td class="num">${m.auto === 'won_value' ? `<span class="dot ${ryg(x.t[m.key].d, x.t[m.key].c)}"></span> ` : ''}${fmtM(m, x.t[m.key].d)}<small class="m">/${fmtM(m, x.t[m.key].c)}</small></td>`).join('')}${ratio ? `<td class="num"><span class="dot ${ratioDot(x)}"></span> ${x.rv.toFixed(1)}</td>` : ''}${crmMode ? `<td class="num">${money(x.open)}<small class="m"> ·${x.openN}</small></td>` : ''}</tr>`).join('')}
+        : `<tr><td>${x.person ? `<span class="person">${esc(x.b)}</span>` : `<b>${x.b ? esc(x.b) : 'No branch'}</b>`}${byDeal && !x.reps && x.b ? ` <span class="pill n">no ${esc(tab.team_label || tab.label)} here</span>` : ''}</td>${bm.map((m) => `<td class="num">${!x.t[m.key] ? '<span class="m">—</span>' : `${m.auto === 'won_value' ? `<span class="dot ${ryg(x.t[m.key].d, x.t[m.key].c)}"></span> ` : ''}${fmtM(m, x.t[m.key].d)}<small class="m">/${fmtM(m, x.t[m.key].c)}</small>`}</td>`).join('')}${ratio ? `<td class="num">${byDeal && !x.reps ? '<span class="m">—</span>' : `<span class="dot ${ratioDot(x)}"></span> ${x.rv.toFixed(1)}`}</td>` : ''}${crmMode ? `<td class="num">${money(x.open)}<small class="m"> ·${x.openN}</small></td>` : ''}</tr>`).join('')}
       </tbody></table></div>
       ${branchRows.some((x) => x.unassigned) ? `<p class="note">Not on roster: deals whose ${esc(cfg.crmLabel)} rep matches nobody in Summit, by branch. Their names and open dollars sit under the branch. They show on ${esc(teamTabs().map((t) => t.label).join(' and '))} until the rep is added to the roster. Typed numbers like site audits have no one to type them, so they read —.</p>` : ''}
+      ${byDeal ? `<p class="note">Every ${esc(tab.deals.kind === 'netnew' ? 'new-property' : tab.deals.kind === 'enhancement' ? 'existing-client' : String(tab.deals.division || ''))} deal counts in its own ${esc(cfg.crmLabel)} branch, whoever sold it. Typed numbers and commitments come from the ${esc(tab.team_label || tab.label)} rostered at that branch; where there are none they read —.</p>` : ''}
       ${tab.branch_note ? `<p class="note">${esc(tab.branch_note)}</p>` : ''}
     </div>
   </div>

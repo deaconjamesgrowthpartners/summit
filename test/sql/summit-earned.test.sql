@@ -77,3 +77,22 @@ begin
   reset role;
   raise notice '018 checks passed';
 end $$;
+
+-- 019: Grow and Net New count deals by kind; a milestone line with no month lands on the contract start
+update deals set start_date = '2026-03-01', raw = raw || '{"OpportunityBillings": [
+    {"Active": true, "BillMonth": null, "SortOrder": 1, "InvoiceAmount": 1000, "InvoiceDescription": "down payment"},
+    {"Active": true, "BillMonth": 6, "SortOrder": 2, "InvoiceAmount": 500}]}'::jsonb
+ where external_id = '9002';
+update workspaces set tabs = '[{"key": "grow", "team": "grow"}, {"key": "netnew", "team": "netnew"}, {"key": "summit"}]' where slug = 'elevation-outdoors';
+\i :mig19
+\i :mig19
+do $$
+begin
+  assert (select billing from deal_board where external_id = '9002') = '[[3, 1000], [6, 500]]'::jsonb, 'milestone line on the start month: ' || (select billing::text from deal_board where external_id = '9002');
+  assert (select billing from deal_board where external_id = '11') = '[[4, 1516.67], [5, 1516.67]]'::jsonb, 'monthly lines unchanged';
+  assert (select tabs -> 0 -> 'deals' ->> 'kind' from workspaces where slug = 'elevation-outdoors') = 'enhancement', 'grow counts existing clients';
+  assert (select tabs -> 1 -> 'deals' ->> 'kind' from workspaces where slug = 'elevation-outdoors') = 'netnew', 'net new counts new properties';
+  assert (select tabs -> 2 -> 'deals' from workspaces where slug = 'elevation-outdoors') is null, 'other tabs untouched';
+  assert (select jsonb_array_length(tabs) from workspaces where slug = 'elevation-outdoors') = 3, 'no tab lost';
+  raise notice '019 checks passed';
+end $$;

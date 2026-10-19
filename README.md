@@ -49,6 +49,8 @@ Env (optional, the publishable key and URL are the defaults):
    - `017_source_sync_apikey.sql`: `source_sync_now` sends the `apikey` header the functions gateway now asks for.
    - `018_summit_earned_advanced.sql`: earned revenue snapshots, Delivered as a proposal, stage ranks, Indirect off the
      board, the billing schedule on each deal, and `deal_motion()` for earned and advanced in a period.
+   - `019_team_deals_by_kind.sql`: Grow and Net New build their branch rows from the deals (existing-client work and
+     new-property work, each in its own Aspire branch, whoever sold it), and milestone billing lines are kept.
 2. Dashboard > Authentication > Hooks > **Before User Created** > Postgres >
    `public.summit_before_user_created`. This is what stops strangers. Without it,
    anyone who types an email gets an account (and sees nothing, but still).
@@ -210,7 +212,11 @@ plain "not on roster" tag, and have their own filter on All Accounts. Aspire dea
 Aspire and the nightly sync brings the change. Aspire has no bid-sent date, so a bid is any Aspire opportunity created
 that week, whatever its status now, at its estimate. A typed number still overrides it. The bid tiles say so.
 
-On Grow and Net New, deals whose rep is not on the roster get a row under their branch, with the Aspire names and
+On Grow and Net New with `deals` set on the tab (019 does it for Elevation), the branch rows come from the deals: every
+deal of the tab's kind (`{"kind": "enhancement"}` existing clients, `{"kind": "netnew"}` new properties, or
+`{"division": "<match>"}`) in its own Aspire branch, whoever sold it. Bids, won and starting dollars come from those
+deals; typed numbers and commitments from the team's reps rostered at that branch, and a branch with none reads —.
+Without `deals`, as before: deals whose rep is not on the roster get a row under their branch, with the Aspire names and
 their open dollars under the branch name. Typed measures (site audits) read — on those rows.
 
 Run the demo this way with `?pipeline=aspire`.
