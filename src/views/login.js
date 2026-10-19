@@ -25,10 +25,12 @@ export function renderLogin(el, { step = 'email', email = '', err = '', busy = f
   </form></div>`;
 }
 
-export function renderGate(el, { title, body = '', list = [], signOut = true }) {
+export function renderGate(el, { title, body = '', list = [], signOut = true, detail = '', retry = false }) {
   el.innerHTML = `<div class="gate"><div class="card">
     <h1>${esc(title)}</h1>
     ${body ? `<p>${esc(body)}</p>` : ''}
+    ${detail ? `<pre class="err-detail">${esc(detail)}</pre>` : ''}
+    ${retry ? '<button class="btn" data-retry>Try again</button>' : ''}
     ${list.length ? `<ul>${list.map((x) => `<li><a href="/${esc(x.slug)}">${esc(x.name)}</a></li>`).join('')}</ul>` : ''}
     ${signOut ? '<button class="btn sec" data-signout>Sign out</button>' : ''}
   </div></div>`;

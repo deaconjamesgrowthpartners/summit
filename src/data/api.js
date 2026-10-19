@@ -47,14 +47,25 @@ const must = ({ data, error }) => {
   return data;
 };
 
-async function all(q) {
+// every page of a read. A failure says which read and which page, so the screen can say what broke.
+async function all(q, what = '') {
   const out = [];
   for (let from = 0; ; from += 1000) {
-    const rows = must(await q().range(from, from + 999));
+    let rows;
+    try { rows = must(await q().range(from, from + 999)); }
+    catch (e) { throw readError(e, what ? `${what}${from ? `, rows ${from + 1} on` : ''}` : ''); }
     out.push(...rows);
     if (rows.length < 1000) return out;
   }
 }
+// a database error with the read it came from: { what, message, code, hint, details }
+export function readError(e, what) {
+  const err = e instanceof Error ? e : Object.assign(new Error(e?.message || String(e)), e || {});
+  if (what && !err.what) err.what = what;
+  return err;
+}
+// a table or function that is not there yet: a migration has not run. Anything else is a real failure.
+const missing = (e) => ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(e?.code) || /does not exist|could not find/i.test(e?.message || '');
 
 export const demo = false;
 
@@ -97,11 +108,13 @@ export async function isAdmin(userId) {
   return rows.length > 0;
 }
 // the workspace's deal source (migration 012). null before it runs, and the config falls back.
+// Only a missing table falls back to the old config. Any other failure is shown, never papered over with the old views.
 export async function source(wsId) {
   try {
     return must(await sb.from('deal_sources').select('id,mode,connector,label,mapping,schedule,enabled').eq('workspace_id', wsId).maybeSingle());
-  } catch {
-    return null;
+  } catch (e) {
+    if (missing(e)) return null;
+    throw readError(e, 'the deal source');
   }
 }
 
@@ -114,14 +127,14 @@ export async function load(wsId, sinceWeek, src = { mode: 'native', legacy: true
   // stage history for typed deals: what "meetings booked this week" is counted from. null before 014.
   const events = shape === 'board' && src.mode === 'native' ? await stageEvents(wsId) : null;
   if (shape === 'board' && src.mode === 'native' && events === null) shape = 'opps';
-  const deals = shape === 'board' ? all(() => sb.from('deal_board').select('*').eq('workspace_id', wsId).order('created_at').order('deal_id'))
-    : shape === 'aspire' ? all(() => sb.from('aspire_pipeline').select('*').eq('workspace_id', wsId).order('opportunity_id'))
-    : all(() => sb.from('opps').select('*').eq('workspace_id', wsId).order('created_at'));
+  const deals = shape === 'board' ? all(() => sb.from('deal_board').select('*').eq('workspace_id', wsId).order('created_at').order('deal_id'), 'the deals (deal_board)')
+    : shape === 'aspire' ? all(() => sb.from('aspire_pipeline').select('*').eq('workspace_id', wsId).order('opportunity_id'), 'the deals (aspire_pipeline)')
+    : all(() => sb.from('opps').select('*').eq('workspace_id', wsId).order('created_at'), 'the deals (opps)');
   const [members, rows, commits, goals, accounts] = await Promise.all([
-    all(() => sb.from('members').select('*').eq('workspace_id', wsId).order('full_name')),
+    all(() => sb.from('members').select('*').eq('workspace_id', wsId).order('full_name'), 'the roster'),
     deals,
-    all(() => sb.from('commits').select('*').eq('workspace_id', wsId).gte('week_key', sinceWeek)),
-    all(() => sb.from('goals').select('*').eq('workspace_id', wsId)),
+    all(() => sb.from('commits').select('*').eq('workspace_id', wsId).gte('week_key', sinceWeek), 'the commits'),
+    all(() => sb.from('goals').select('*').eq('workspace_id', wsId), 'the goals'),
     // the book is optional. a workspace without one still loads.
     all(() => sb.from('accounts').select('*').eq('workspace_id', wsId).order('property')).catch(() => []),
   ]);

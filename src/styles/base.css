@@ -193,3 +193,6 @@ td button.cellbtn.on b{text-decoration:underline}
 /* a section the period toggle does not drive says so, up front */
 .sec.fixed .sec-h h2 .pill{margin-left:8px;vertical-align:middle;font-size:11px}
 .fixed-why{font-size:13px;color:var(--ink2);margin:-4px 0 10px}
+
+/* what a failed load said, so it can be read out or sent on */
+.err-detail{white-space:pre-wrap;word-break:break-word;font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:10px 0 14px;max-height:220px;overflow:auto}

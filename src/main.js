@@ -140,12 +140,30 @@ function setDeals(data) {
   S.changes = data.changes || [];
 }
 
+// a failed load says what failed and what the database said, with a way to try again. Never an endless spinner.
+function showLoadError(e) {
+  teardown();
+  const what = e?.what ? `Loading ${e.what} failed.` : 'Loading this workspace failed.';
+  const detail = [e?.message || String(e || 'unknown error'), e?.code ? `code ${e.code}` : '', e?.details || '', e?.hint ? `hint: ${e.hint}` : '']
+    .filter(Boolean).join('\n');
+  renderGate(app, { title: 'Summit could not load', body: `${what} Nothing is lost: the data is still there. Try again, and if it keeps happening, send the lines below to Joe.`, detail, retry: true });
+}
+
 async function openWorkspace(slug) {
+  try {
+    return await openWorkspaceOrThrow(slug);
+  } catch (e) {
+    console.error('Summit load failed', e);
+    showLoadError(e);
+  }
+}
+
+async function openWorkspaceOrThrow(slug) {
   teardown();
   const row = await api.workspace(slug).catch(() => null);
   // same screen whether the slug does not exist or you are not on it
   if (!row) return renderGate(app, { title: 'Nothing here', body: 'Check the link, or sign in with the email your team uses.' });
-  S.cfg = normalize(row, await api.source(row.id).catch(() => null));
+  S.cfg = normalize(row, await api.source(row.id));
   applyBrand(S.cfg.brand);
   document.title = `Summit · ${S.cfg.name}`;
   const w = wk();
@@ -364,6 +382,7 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('click', async (e) => {
   const t = e.target;
+  if (t.closest('[data-retry]')) { location.reload(); return; }
   if (t.closest('[data-signout]')) { await api.signOut(); started = false; teardown(); login = { step: 'email', email: '' }; history.replaceState(null, '', location.pathname); return showLogin(); }
   if (t.closest('[data-login-back]')) { login = { step: 'email', email: login.email }; return showLogin(); }
   if (t.closest('[data-login-resend]')) {
@@ -427,6 +446,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.classList?.contains('ed') && e.target.tagName === 'INPUT' && e.target.type !== 'search') e.target.blur();
   // a Summit tile is a div with role=button: Enter and Space open its deals, the same as a click
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('div[data-drill]')) { e.preventDefault(); e.target.click(); }
+});
+
+// the last net: a failure nothing else caught, while the screen still says Loading, is shown instead of spinning
+window.addEventListener('unhandledrejection', (ev) => {
+  if (app.querySelector('.gate .empty')?.textContent === 'Loading') showLoadError(ev.reason);
 });
 
 boot();

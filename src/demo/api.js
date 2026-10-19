@@ -72,6 +72,8 @@ export async function linkMember() { return 0; }
 export const linkError = null;
 export async function source(wsId) { return clone(ws[wsId]?.source || null); }
 export async function load(wsId, _since, src = {}) {
+  // ?fail=1: the deals read fails the way a database error does, to check the screen says so
+  if (q.get('fail')) throw Object.assign(new Error('more than one row returned by a subquery used as an expression'), { code: '21000', what: 'the deals (deal_board), rows 1001 on' });
   const W = ws[wsId];
   const native = W.source.mode === 'native';
   return clone({
